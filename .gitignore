@@ -1,0 +1,47 @@
+# Build directories
+build/
+build_mingw/
+build_nmake/
+out/
+
+# CMake generated
+CMakeFiles/
+CMakeCache.txt
+cmake_install.cmake
+Makefile
+*.cmake
+!CMakeLists.txt
+
+# Compiled binaries
+*.exe
+*.dll
+*.obj
+*.pdb
+*.ilk
+*.exp
+*.lib
+*.a
+*.so
+*.dylib
+
+# Qt MOC / autogen
+*_autogen/
+moc_*.cpp
+moc_predefs.h
+
+# OS
+.DS_Store
+Thumbs.db
+desktop.ini
+
+# IDE
+.vscode/
+.idea/
+*.swp
+*.user
+*.suo
+*.sdf
+.vs/
+
+# Logs
+*.log

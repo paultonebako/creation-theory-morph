@@ -1,0 +1,104 @@
+CREATION THEORY MORPH — COMMERCIAL SOFTWARE LICENSE
+=====================================================
+
+Copyright (c) 2026 Creation Theory. All Rights Reserved.
+
+IMPORTANT: READ THIS LICENSE AGREEMENT CAREFULLY BEFORE USING THIS SOFTWARE.
+
+By installing, copying, downloading, accessing, or otherwise using Creation Theory
+Morph ("the Software"), you agree to be bound by the terms of this License Agreement.
+If you do not agree to these terms, do not install or use the Software.
+
+────────────────────────────────────────────────────────────────────────────────
+1. GRANT OF LICENSE
+────────────────────────────────────────────────────────────────────────────────
+Creation Theory ("Licensor") grants you ("Licensee") a limited, non-exclusive,
+non-transferable, revocable license to install and use one (1) copy of the
+Software solely for your personal or internal business purposes, subject to the
+payment of the applicable subscription fee of $5.00 USD per month ("Subscription").
+
+Your license is valid only while your Subscription is active and in good standing.
+
+────────────────────────────────────────────────────────────────────────────────
+2. SUBSCRIPTION & PAYMENT
+────────────────────────────────────────────────────────────────────────────────
+Access to the Software requires an active monthly Subscription purchased through
+the official Creation Theory website at https://creationtheory.co (or such URL
+as designated by Creation Theory).
+
+  - Subscription fee: $5.00 USD / month
+  - Subscriptions renew automatically unless cancelled before the renewal date.
+  - No refunds are issued for partial months.
+  - Creation Theory reserves the right to modify subscription pricing with 30 days
+    notice to active subscribers.
+
+────────────────────────────────────────────────────────────────────────────────
+3. RESTRICTIONS
+────────────────────────────────────────────────────────────────────────────────
+Licensee shall NOT:
+
+  a) Copy, reproduce, distribute, publish, or sublicense the Software or any
+     portion thereof to any third party.
+  b) Reverse engineer, decompile, disassemble, or attempt to derive the source
+     code of the Software.
+  c) Modify, adapt, translate, or create derivative works based on the Software.
+  d) Rent, lease, lend, sell, resell, or transfer the Software or any license
+     rights to another party.
+  e) Remove, alter, or obscure any proprietary notices, labels, or marks on the
+     Software.
+  f) Use the Software to develop a competing product or service.
+  g) Share, publish, or distribute your license key or account credentials.
+
+────────────────────────────────────────────────────────────────────────────────
+4. INTELLECTUAL PROPERTY
+────────────────────────────────────────────────────────────────────────────────
+The Software, including all code, design, graphics, documentation, and associated
+materials, is the exclusive intellectual property of Creation Theory and is
+protected by copyright law and international treaties. This License does not
+transfer any ownership rights to the Licensee.
+
+────────────────────────────────────────────────────────────────────────────────
+5. TERMINATION
+────────────────────────────────────────────────────────────────────────────────
+This License is effective until terminated. Creation Theory may terminate this
+License immediately and without notice if Licensee breaches any term of this
+Agreement. Upon termination, Licensee must destroy all copies of the Software.
+Cancellation of the Subscription also terminates this License.
+
+────────────────────────────────────────────────────────────────────────────────
+6. DISCLAIMER OF WARRANTIES
+────────────────────────────────────────────────────────────────────────────────
+THE SOFTWARE IS PROVIDED "AS IS" WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
+IMPLIED, INCLUDING BUT NOT LIMITED TO WARRANTIES OF MERCHANTABILITY, FITNESS
+FOR A PARTICULAR PURPOSE, AND NON-INFRINGEMENT. CREATION THEORY DOES NOT WARRANT
+THAT THE SOFTWARE WILL BE ERROR-FREE OR UNINTERRUPTED.
+
+────────────────────────────────────────────────────────────────────────────────
+7. LIMITATION OF LIABILITY
+────────────────────────────────────────────────────────────────────────────────
+IN NO EVENT SHALL CREATION THEORY BE LIABLE FOR ANY INDIRECT, INCIDENTAL,
+SPECIAL, EXEMPLARY, OR CONSEQUENTIAL DAMAGES ARISING OUT OF OR IN CONNECTION
+WITH THIS LICENSE OR THE USE OF THE SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY
+OF SUCH DAMAGES. CREATION THEORY'S TOTAL LIABILITY SHALL NOT EXCEED THE AMOUNT
+PAID BY LICENSEE IN THE THREE (3) MONTHS PRECEDING THE CLAIM.
+
+────────────────────────────────────────────────────────────────────────────────
+8. GOVERNING LAW
+────────────────────────────────────────────────────────────────────────────────
+This Agreement shall be governed by and construed in accordance with the laws of
+the United States. Any disputes arising under this Agreement shall be subject to
+the exclusive jurisdiction of the courts located in the United States.
+
+────────────────────────────────────────────────────────────────────────────────
+9. CONTACT
+────────────────────────────────────────────────────────────────────────────────
+Creation Theory
+https://creationtheory.co
+support@creationtheory.co
+
+────────────────────────────────────────────────────────────────────────────────
+
+Creation Theory Morph is a trademark of Creation Theory.
+Unauthorized use of this Software is a violation of copyright law.
+
+© 2026 Creation Theory. All Rights Reserved.
