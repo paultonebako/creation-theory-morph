@@ -67,6 +67,12 @@ void GLViewport::setCuttingPlaneConfig(int countX, int countY, int countZ, Axis 
     update();
 }
 
+void GLViewport::setCutMethod(CutMethod method)
+{
+    m_cutMethod = method;
+    update();
+}
+
 void GLViewport::fitView()
 {
     if (m_mesh.isEmpty()) {
@@ -237,7 +243,7 @@ void GLViewport::drawMesh(bool wireframeOnly, bool overlayWire)
     if (!wireframeOnly) {
         glEnable(GL_CULL_FACE);
         glPolygonMode(GL_FRONT_AND_BACK, GL_FILL);
-        glColor3f(0.75f, 0.76f, 0.82f);
+        glColor3f(0.97f, 0.93f, 0.82f);
         glBegin(GL_TRIANGLES);
         for (int i = 0; i < tris.size(); ++i) {
             const MeshObject::Triangle& tri = tris[i];
@@ -257,7 +263,7 @@ void GLViewport::drawMesh(bool wireframeOnly, bool overlayWire)
     if (wireframeOnly || overlayWire) {
         glDisable(GL_CULL_FACE);
         glPolygonMode(GL_FRONT_AND_BACK, GL_LINE);
-        glColor3f(0.05f, 0.05f, 0.08f);
+        glColor3f(0.22f, 0.24f, 0.30f);
         glLineWidth(1.2f);
         glBegin(GL_TRIANGLES);
         for (const MeshObject::Triangle& tri : tris) {
@@ -276,79 +282,271 @@ void GLViewport::drawMesh(bool wireframeOnly, bool overlayWire)
 
 void GLViewport::drawCuttingPlanes()
 {
-    if (m_mesh.isEmpty()) {
+    if (m_mesh.isEmpty())
         return;
+
+    glDisable(GL_CULL_FACE);
+    glEnable(GL_BLEND);
+    glBlendFunc(GL_SRC_ALPHA, GL_ONE_MINUS_SRC_ALPHA);
+
+    switch (m_cutMethod) {
+    case CutMethod::Planar:  drawPlanarCutViz();  break;
+    case CutMethod::Conic:   drawConicCutViz();   break;
+    case CutMethod::Flexi:   drawFlexiCutViz();   break;
+    case CutMethod::Grid:    drawGridCutViz();     break;
+    case CutMethod::Radial:  drawRadialCutViz();  break;
+    case CutMethod::Modular: drawModularCutViz(); break;
     }
 
+    glDisable(GL_BLEND);
+}
+
+namespace {
+void planeColor(bool adjusted)
+{
+    if (adjusted)
+        glColor4f(0.85f, 0.18f, 0.18f, 0.24f);
+    else
+        glColor4f(0.10f, 0.75f, 0.85f, 0.18f);
+}
+} // namespace
+
+void GLViewport::drawGridCutViz()
+{
     const QVector3D mn = m_mesh.minBounds();
     const QVector3D mx = m_mesh.maxBounds();
     const float margin = qMax((mx - mn).length() * 0.03f, 0.001f);
     const QVector3D a = mn - QVector3D(margin, margin, margin);
     const QVector3D b = mx + QVector3D(margin, margin, margin);
 
-    auto drawX = [&](float x, bool adjusted) {
-        glColor4f(adjusted ? 0.90f : 0.05f, adjusted ? 0.20f : 0.80f, adjusted ? 0.20f : 0.85f, 0.45f);
+    auto drawX = [&](float x, bool adj) {
+        planeColor(adj);
         glBegin(GL_QUADS);
-        glVertex3f(x, a.y(), a.z());
-        glVertex3f(x, b.y(), a.z());
-        glVertex3f(x, b.y(), b.z());
-        glVertex3f(x, a.y(), b.z());
+        glVertex3f(x, a.y(), a.z()); glVertex3f(x, b.y(), a.z());
+        glVertex3f(x, b.y(), b.z()); glVertex3f(x, a.y(), b.z());
         glEnd();
     };
-    auto drawY = [&](float y, bool adjusted) {
-        glColor4f(adjusted ? 0.90f : 0.05f, adjusted ? 0.20f : 0.80f, adjusted ? 0.20f : 0.85f, 0.45f);
+    auto drawY = [&](float y, bool adj) {
+        planeColor(adj);
         glBegin(GL_QUADS);
-        glVertex3f(a.x(), y, a.z());
-        glVertex3f(b.x(), y, a.z());
-        glVertex3f(b.x(), y, b.z());
-        glVertex3f(a.x(), y, b.z());
+        glVertex3f(a.x(), y, a.z()); glVertex3f(b.x(), y, a.z());
+        glVertex3f(b.x(), y, b.z()); glVertex3f(a.x(), y, b.z());
         glEnd();
     };
-    auto drawZ = [&](float z, bool adjusted) {
-        glColor4f(adjusted ? 0.90f : 0.05f, adjusted ? 0.20f : 0.80f, adjusted ? 0.20f : 0.85f, 0.45f);
+    auto drawZ = [&](float z, bool adj) {
+        planeColor(adj);
         glBegin(GL_QUADS);
-        glVertex3f(a.x(), a.y(), z);
-        glVertex3f(b.x(), a.y(), z);
-        glVertex3f(b.x(), b.y(), z);
-        glVertex3f(a.x(), b.y(), z);
+        glVertex3f(a.x(), a.y(), z); glVertex3f(b.x(), a.y(), z);
+        glVertex3f(b.x(), b.y(), z); glVertex3f(a.x(), b.y(), z);
         glEnd();
     };
 
-    glDisable(GL_CULL_FACE);
-    glEnable(GL_BLEND);
-    glBlendFunc(GL_SRC_ALPHA, GL_ONE_MINUS_SRC_ALPHA);
-
-    auto drawAxisPlanes = [&](Axis axis, int count) {
+    auto drawAxis = [&](Axis axis, int count) {
         const float minV = axis == Axis::X ? a.x() : (axis == Axis::Y ? a.y() : a.z());
         const float maxV = axis == Axis::X ? b.x() : (axis == Axis::Y ? b.y() : b.z());
         if (count <= 1) {
-            const bool adjusted = (axis == m_adjustedAxis) && (m_adjustedIndex == 0);
-            if (axis == Axis::X) {
-                drawX(0.5f * (minV + maxV), adjusted);
-            } else if (axis == Axis::Y) {
-                drawY(0.5f * (minV + maxV), adjusted);
-            } else {
-                drawZ(0.5f * (minV + maxV), adjusted);
-            }
+            const bool adj = (axis == m_adjustedAxis) && (m_adjustedIndex == 0);
+            const float mid = 0.5f * (minV + maxV);
+            if (axis == Axis::X) drawX(mid, adj);
+            else if (axis == Axis::Y) drawY(mid, adj);
+            else drawZ(mid, adj);
             return;
         }
         for (int i = 0; i < count; ++i) {
-            const float t = float(i + 1) / float(count + 1);
-            const float p = minV + t * (maxV - minV);
-            const bool adjusted = (axis == m_adjustedAxis) && (i == m_adjustedIndex);
-            if (axis == Axis::X) {
-                drawX(p, adjusted);
-            } else if (axis == Axis::Y) {
-                drawY(p, adjusted);
-            } else {
-                drawZ(p, adjusted);
-            }
+            const float p = minV + float(i + 1) / float(count + 1) * (maxV - minV);
+            const bool adj = (axis == m_adjustedAxis) && (i == m_adjustedIndex);
+            if (axis == Axis::X) drawX(p, adj);
+            else if (axis == Axis::Y) drawY(p, adj);
+            else drawZ(p, adj);
         }
     };
 
-    drawAxisPlanes(Axis::X, m_cutX);
-    drawAxisPlanes(Axis::Y, m_cutY);
-    drawAxisPlanes(Axis::Z, m_cutZ);
+    drawAxis(Axis::X, m_cutX);
+    drawAxis(Axis::Y, m_cutY);
+    drawAxis(Axis::Z, m_cutZ);
+}
 
-    glDisable(GL_BLEND);
+void GLViewport::drawPlanarCutViz()
+{
+    const QVector3D mn = m_mesh.minBounds();
+    const QVector3D mx = m_mesh.maxBounds();
+    const float margin = qMax((mx - mn).length() * 0.03f, 0.001f);
+    const QVector3D a = mn - QVector3D(margin, margin, margin);
+    const QVector3D b = mx + QVector3D(margin, margin, margin);
+
+    const Axis axis = m_adjustedAxis;
+    const int count = (axis == Axis::X) ? m_cutX : (axis == Axis::Y ? m_cutY : m_cutZ);
+    const float minV = (axis == Axis::X) ? a.x() : (axis == Axis::Y ? a.y() : a.z());
+    const float maxV = (axis == Axis::X) ? b.x() : (axis == Axis::Y ? b.y() : b.z());
+
+    for (int i = 0; i < count; ++i) {
+        const float p = minV + float(i + 1) / float(count + 1) * (maxV - minV);
+        planeColor(i == m_adjustedIndex);
+        glBegin(GL_QUADS);
+        if (axis == Axis::X) {
+            glVertex3f(p, a.y(), a.z()); glVertex3f(p, b.y(), a.z());
+            glVertex3f(p, b.y(), b.z()); glVertex3f(p, a.y(), b.z());
+        } else if (axis == Axis::Y) {
+            glVertex3f(a.x(), p, a.z()); glVertex3f(b.x(), p, a.z());
+            glVertex3f(b.x(), p, b.z()); glVertex3f(a.x(), p, b.z());
+        } else {
+            glVertex3f(a.x(), a.y(), p); glVertex3f(b.x(), a.y(), p);
+            glVertex3f(b.x(), b.y(), p); glVertex3f(a.x(), b.y(), p);
+        }
+        glEnd();
+    }
+}
+
+void GLViewport::drawRadialCutViz()
+{
+    const QVector3D mn = m_mesh.minBounds();
+    const QVector3D mx = m_mesh.maxBounds();
+    const float margin = qMax((mx - mn).length() * 0.03f, 0.001f);
+    const float cx  = (mn.x() + mx.x()) * 0.5f;
+    const float cz  = (mn.z() + mx.z()) * 0.5f;
+    const float yBot = mn.y() - margin;
+    const float yTop = mx.y() + margin;
+    const float radius = (qMax(mx.x() - mn.x(), mx.z() - mn.z()) * 0.5f + margin) * 1.2f;
+
+    const int N = m_cutX;
+    for (int i = 0; i < N; ++i) {
+        const float angle = float(M_PI) * float(i) / float(N);
+        const float dx = std::cos(angle) * radius;
+        const float dz = std::sin(angle) * radius;
+        planeColor(m_adjustedAxis == Axis::X && i == m_adjustedIndex);
+        glBegin(GL_QUADS);
+        glVertex3f(cx - dx, yBot, cz - dz); glVertex3f(cx + dx, yBot, cz + dz);
+        glVertex3f(cx + dx, yTop, cz + dz); glVertex3f(cx - dx, yTop, cz - dz);
+        glEnd();
+    }
+}
+
+void GLViewport::drawConicCutViz()
+{
+    const QVector3D mn = m_mesh.minBounds();
+    const QVector3D mx = m_mesh.maxBounds();
+    const float margin = qMax((mx - mn).length() * 0.03f, 0.001f);
+    const float cx  = (mn.x() + mx.x()) * 0.5f;
+    const float cz  = (mn.z() + mx.z()) * 0.5f;
+    const float yBot = mn.y() - margin;
+    const float yTop = mx.y() + margin;
+    const float maxR = qMax(mx.x() - mn.x(), mx.z() - mn.z()) * 0.5f + margin;
+
+    const int N = m_cutX;
+    const int sides = 24;
+    for (int ring = 0; ring < N; ++ring) {
+        const float r = maxR * float(ring + 1) / float(N + 1);
+        planeColor(m_adjustedAxis == Axis::X && ring == m_adjustedIndex);
+        glBegin(GL_QUADS);
+        for (int s = 0; s < sides; ++s) {
+            const float a0 = 2.0f * float(M_PI) * float(s)     / float(sides);
+            const float a1 = 2.0f * float(M_PI) * float(s + 1) / float(sides);
+            glVertex3f(cx + r * std::cos(a0), yBot, cz + r * std::sin(a0));
+            glVertex3f(cx + r * std::cos(a1), yBot, cz + r * std::sin(a1));
+            glVertex3f(cx + r * std::cos(a1), yTop, cz + r * std::sin(a1));
+            glVertex3f(cx + r * std::cos(a0), yTop, cz + r * std::sin(a0));
+        }
+        glEnd();
+    }
+}
+
+void GLViewport::drawFlexiCutViz()
+{
+    const QVector3D mn = m_mesh.minBounds();
+    const QVector3D mx = m_mesh.maxBounds();
+    const float margin = qMax((mx - mn).length() * 0.03f, 0.001f);
+    const QVector3D a = mn - QVector3D(margin, margin, margin);
+    const QVector3D b = mx + QVector3D(margin, margin, margin);
+    const float ampX = (b.z() - a.z()) * 0.07f;
+    const float ampY = (b.y() - a.y()) * 0.05f;
+    const int segs = 20;
+
+    // Wavy X planes
+    for (int i = 0; i < m_cutX; ++i) {
+        const float xBase = a.x() + float(i + 1) / float(m_cutX + 1) * (b.x() - a.x());
+        const float phase = float(i) * 1.3f;
+        planeColor(m_adjustedAxis == Axis::X && i == m_adjustedIndex);
+        glBegin(GL_QUADS);
+        for (int s = 0; s < segs; ++s) {
+            const float t0 = float(s)     / float(segs);
+            const float t1 = float(s + 1) / float(segs);
+            const float z0 = a.z() + t0 * (b.z() - a.z());
+            const float z1 = a.z() + t1 * (b.z() - a.z());
+            const float x0 = xBase + ampX * std::sin(t0 * float(M_PI) * 2.0f + phase);
+            const float x1 = xBase + ampX * std::sin(t1 * float(M_PI) * 2.0f + phase);
+            glVertex3f(x0, a.y(), z0); glVertex3f(x1, a.y(), z1);
+            glVertex3f(x1, b.y(), z1); glVertex3f(x0, b.y(), z0);
+        }
+        glEnd();
+    }
+
+    // Wavy Y planes
+    for (int i = 0; i < m_cutY; ++i) {
+        const float yBase = a.y() + float(i + 1) / float(m_cutY + 1) * (b.y() - a.y());
+        const float phase = float(i) * 0.9f;
+        planeColor(m_adjustedAxis == Axis::Y && i == m_adjustedIndex);
+        glBegin(GL_QUADS);
+        for (int s = 0; s < segs; ++s) {
+            const float t0 = float(s)     / float(segs);
+            const float t1 = float(s + 1) / float(segs);
+            const float x0 = a.x() + t0 * (b.x() - a.x());
+            const float x1 = a.x() + t1 * (b.x() - a.x());
+            const float y0 = yBase + ampY * std::sin(t0 * float(M_PI) * 2.0f + phase);
+            const float y1 = yBase + ampY * std::sin(t1 * float(M_PI) * 2.0f + phase);
+            glVertex3f(x0, y0, a.z()); glVertex3f(x1, y1, a.z());
+            glVertex3f(x1, y1, b.z()); glVertex3f(x0, y0, b.z());
+        }
+        glEnd();
+    }
+}
+
+void GLViewport::drawModularCutViz()
+{
+    const QVector3D mn = m_mesh.minBounds();
+    const QVector3D mx = m_mesh.maxBounds();
+    const float margin = qMax((mx - mn).length() * 0.03f, 0.001f);
+    const QVector3D a = mn - QVector3D(margin, margin, margin);
+    const QVector3D b = mx + QVector3D(margin, margin, margin);
+
+    const int NX = m_cutX;
+    const int NZ = m_cutZ;
+    const float xCell   = (b.x() - a.x()) / float(NX + 1);
+    const float zCell   = (b.z() - a.z()) / float(NZ + 1);
+    const float brickOff = xCell * 0.5f;
+
+    // Z separator planes (full width)
+    for (int i = 0; i < NZ; ++i) {
+        const float z = a.z() + float(i + 1) * zCell;
+        planeColor(m_adjustedAxis == Axis::Z && i == m_adjustedIndex);
+        glBegin(GL_QUADS);
+        glVertex3f(a.x(), a.y(), z); glVertex3f(b.x(), a.y(), z);
+        glVertex3f(b.x(), b.y(), z); glVertex3f(a.x(), b.y(), z);
+        glEnd();
+    }
+
+    // X planes per Z row with brick offset on odd rows
+    for (int iz = 0; iz <= NZ; ++iz) {
+        const float z0 = a.z() + float(iz) * zCell;
+        const float z1 = qMin(z0 + zCell, b.z());
+        const float off = (iz % 2 == 1) ? brickOff : 0.0f;
+        for (int i = 0; i < NX; ++i) {
+            const float x = a.x() + float(i + 1) * xCell + off;
+            if (x <= a.x() || x >= b.x()) continue;
+            planeColor(m_adjustedAxis == Axis::X && i == m_adjustedIndex);
+            glBegin(GL_QUADS);
+            glVertex3f(x, a.y(), z0); glVertex3f(x, b.y(), z0);
+            glVertex3f(x, b.y(), z1); glVertex3f(x, a.y(), z1);
+            glEnd();
+        }
+    }
+
+    // Y planes
+    for (int i = 0; i < m_cutY; ++i) {
+        const float y = a.y() + float(i + 1) / float(m_cutY + 1) * (b.y() - a.y());
+        planeColor(m_adjustedAxis == Axis::Y && i == m_adjustedIndex);
+        glBegin(GL_QUADS);
+        glVertex3f(a.x(), y, a.z()); glVertex3f(b.x(), y, a.z());
+        glVertex3f(b.x(), y, b.z()); glVertex3f(a.x(), y, b.z());
+        glEnd();
+    }
 }

@@ -33,6 +33,7 @@
 #include <QVBoxLayout>
 
 #include <cmath>
+#include <functional>
 
 namespace {
 QString safeStem(const QString& filePath)
@@ -183,10 +184,15 @@ void MainWindow::createDockPanels()
 
     auto* inputGroup = new QGroupBox(QStringLiteral("Input"), m_cutPanel);
     auto* inputLayout = new QVBoxLayout(inputGroup);
-    auto* methodCombo = new QComboBox(inputGroup);
-    methodCombo->addItem(QStringLiteral("Grid cut"));
-    methodCombo->setEnabled(false);
-    addRow(inputLayout, QStringLiteral("Method"), methodCombo);
+    m_methodCombo = new QComboBox(inputGroup);
+    m_methodCombo->addItem(QStringLiteral("Planar cut"),  static_cast<int>(GLViewport::CutMethod::Planar));
+    m_methodCombo->addItem(QStringLiteral("Conic cut"),   static_cast<int>(GLViewport::CutMethod::Conic));
+    m_methodCombo->addItem(QStringLiteral("Flexi cut"),   static_cast<int>(GLViewport::CutMethod::Flexi));
+    m_methodCombo->addItem(QStringLiteral("Grid cut"),    static_cast<int>(GLViewport::CutMethod::Grid));
+    m_methodCombo->addItem(QStringLiteral("Radial cut"),  static_cast<int>(GLViewport::CutMethod::Radial));
+    m_methodCombo->addItem(QStringLiteral("Modular cut"), static_cast<int>(GLViewport::CutMethod::Modular));
+    m_methodCombo->setCurrentIndex(3); // default: Grid cut
+    addRow(inputLayout, QStringLiteral("Method"), m_methodCombo);
     addRow(inputLayout, QStringLiteral("Unit"), m_unitCombo);
 
     auto* cutGroup = new QGroupBox(QStringLiteral("Cutting Plane"), m_cutPanel);
@@ -361,6 +367,7 @@ void MainWindow::createDockPanels()
     connect(m_connectorDepthRatio, qOverload<double>(&QDoubleSpinBox::valueChanged), this, &MainWindow::onConnectorSettingsChanged);
     connect(m_connectorSize, qOverload<double>(&QDoubleSpinBox::valueChanged), this, &MainWindow::onConnectorSettingsChanged);
     connect(m_connectorTolerance, qOverload<double>(&QDoubleSpinBox::valueChanged), this, &MainWindow::onConnectorSettingsChanged);
+    connect(m_methodCombo, qOverload<int>(&QComboBox::currentIndexChanged), this, &MainWindow::onCutMethodChanged);
     connect(cutBtn, &QPushButton::clicked, this, &MainWindow::performCut);
     connect(closeBtn, &QPushButton::clicked, this, &MainWindow::clearScene);
 }
@@ -495,6 +502,15 @@ void MainWindow::onModelUnitChanged(int index)
     updateMeshInfoStatus();
 }
 
+void MainWindow::onCutMethodChanged(int /*index*/)
+{
+    if (!m_methodCombo || !m_viewport) return;
+    const auto method = static_cast<GLViewport::CutMethod>(m_methodCombo->currentData().toInt());
+    m_viewport->setCutMethod(method);
+    const QString name = m_methodCombo->currentText();
+    statusBar()->showMessage(QStringLiteral("Cut method: %1").arg(name), 2000);
+}
+
 void MainWindow::onCuttingPlaneChanged()
 {
     if (!m_cutXSpin || !m_cutYSpin || !m_cutZSpin || !m_adjustAxisCombo || !m_adjustIndexSpin || !m_adjustValueSpin) {
@@ -552,11 +568,8 @@ void MainWindow::performCut()
         return;
     }
 
-    const int sx = qMax(1, m_cutXSpin->value());
-    const int sy = qMax(1, m_cutYSpin->value());
-    const int sz = qMax(1, m_cutZSpin->value());
-    const QVector3D mn = m_mesh.minBounds();
-    const QVector3D mx = m_mesh.maxBounds();
+    const QVector3D mn   = m_mesh.minBounds();
+    const QVector3D mx   = m_mesh.maxBounds();
     const QVector3D size = mx - mn;
 
     if (qFuzzyIsNull(size.x()) || qFuzzyIsNull(size.y()) || qFuzzyIsNull(size.z())) {
@@ -564,37 +577,109 @@ void MainWindow::performCut()
         return;
     }
 
-    const int partCount = sx * sy * sz;
-    QVector<MeshObject> parts(partCount);
-    const auto& verts = m_mesh.vertices();
-    const auto& tris = m_mesh.triangles();
+    const int sx = qMax(1, m_cutXSpin->value());
+    const int sy = qMax(1, m_cutYSpin->value());
+    const int sz = qMax(1, m_cutZSpin->value());
+    const float cx  = (mn.x() + mx.x()) * 0.5f;
+    const float czc = (mn.z() + mx.z()) * 0.5f;
 
-    auto clampBin = [](int v, int maxV) { return qBound(0, v, maxV - 1); };
-    auto binFor = [](float p, float minV, float span, int sections) {
-        const float t = (p - minV) / span;
-        return int(std::floor(t * sections));
+    const GLViewport::CutMethod method = m_viewport->cutMethod();
+
+    int totalParts = 1;
+    std::function<int(const QVector3D&)> assignBin;
+
+    auto gridBin = [&](float p, float minV, float span, int N) {
+        return qBound(0, int(std::floor((p - minV) / span * float(N))), N - 1);
     };
-    auto idxFor = [sx, sy](int ix, int iy, int iz) { return (iz * sy + iy) * sx + ix; };
+
+    switch (method) {
+    case GLViewport::CutMethod::Grid:
+        totalParts = sx * sy * sz;
+        assignBin  = [=](const QVector3D& c) {
+            int ix = gridBin(c.x(), mn.x(), size.x(), sx);
+            int iy = gridBin(c.y(), mn.y(), size.y(), sy);
+            int iz = gridBin(c.z(), mn.z(), size.z(), sz);
+            return (iz * sy + iy) * sx + ix;
+        };
+        break;
+
+    case GLViewport::CutMethod::Planar: {
+        const GLViewport::Axis axis = static_cast<GLViewport::Axis>(m_adjustAxisCombo->currentData().toInt());
+        const int N = (axis == GLViewport::Axis::X) ? sx : (axis == GLViewport::Axis::Y ? sy : sz);
+        totalParts  = N + 1;
+        assignBin   = [=](const QVector3D& c) {
+            float val  = (axis == GLViewport::Axis::X) ? c.x() : (axis == GLViewport::Axis::Y ? c.y() : c.z());
+            float minV = (axis == GLViewport::Axis::X) ? mn.x() : (axis == GLViewport::Axis::Y ? mn.y() : mn.z());
+            float span = (axis == GLViewport::Axis::X) ? size.x() : (axis == GLViewport::Axis::Y ? size.y() : size.z());
+            for (int i = 0; i < N; ++i)
+                if (val < minV + float(i + 1) / float(N + 1) * span)
+                    return i;
+            return N;
+        };
+        break;
+    }
+
+    case GLViewport::CutMethod::Radial:
+        totalParts = sx;
+        assignBin  = [=](const QVector3D& c) {
+            float angle = std::atan2(c.z() - czc, c.x() - cx);
+            if (angle < 0.0f) angle += 2.0f * float(M_PI);
+            return qBound(0, int(angle / (2.0f * float(M_PI)) * float(sx)), sx - 1);
+        };
+        break;
+
+    case GLViewport::CutMethod::Conic: {
+        const float maxR = qMax(size.x(), size.z()) * 0.5f + 0.001f;
+        totalParts       = sx;
+        assignBin        = [=](const QVector3D& c) {
+            float r = std::sqrt((c.x() - cx) * (c.x() - cx) + (c.z() - czc) * (c.z() - czc));
+            return qBound(0, int(r / maxR * float(sx)), sx - 1);
+        };
+        break;
+    }
+
+    case GLViewport::CutMethod::Flexi:
+        totalParts = sx * sy * sz;
+        assignBin  = [=](const QVector3D& c) {
+            float tx = (c.x() - mn.x()) / size.x();
+            float ty = (c.y() - mn.y()) / size.y();
+            float tz = (c.z() - mn.z()) / size.z();
+            float warpedTx = tx + 0.12f * std::sin(tz * float(M_PI) * 2.0f);
+            int ix = qBound(0, int(warpedTx * float(sx)), sx - 1);
+            int iy = qBound(0, int(ty * float(sy)), sy - 1);
+            int iz = qBound(0, int(tz * float(sz)), sz - 1);
+            return (iz * sy + iy) * sx + ix;
+        };
+        break;
+
+    case GLViewport::CutMethod::Modular:
+        totalParts = sx * sy * sz;
+        assignBin  = [=](const QVector3D& c) {
+            int ix = gridBin(c.x(), mn.x(), size.x(), sx);
+            int iy = gridBin(c.y(), mn.y(), size.y(), sy);
+            int iz = gridBin(c.z(), mn.z(), size.z(), sz);
+            if (iz % 2 == 1) ix = (ix + sx / 2) % sx;
+            return (iz * sy + iy) * sx + ix;
+        };
+        break;
+    }
+
+    QVector<MeshObject> parts(totalParts);
+    const auto& verts = m_mesh.vertices();
+    const auto& tris  = m_mesh.triangles();
 
     for (const auto& tri : tris) {
-        const QVector3D c = (verts[tri.v0] + verts[tri.v1] + verts[tri.v2]) / 3.0f;
-        int ix = clampBin(binFor(c.x(), mn.x(), size.x(), sx), sx);
-        int iy = clampBin(binFor(c.y(), mn.y(), size.y(), sy), sy);
-        int iz = clampBin(binFor(c.z(), mn.z(), size.z(), sz), sz);
-        MeshObject& part = parts[idxFor(ix, iy, iz)];
-
+        const QVector3D centroid = (verts[tri.v0] + verts[tri.v1] + verts[tri.v2]) / 3.0f;
+        MeshObject& part = parts[assignBin(centroid)];
         const int a = part.addVertex(verts[tri.v0]);
         const int b = part.addVertex(verts[tri.v1]);
-        const int cidx = part.addVertex(verts[tri.v2]);
-        part.addTriangle(a, b, cidx);
+        const int c = part.addVertex(verts[tri.v2]);
+        part.addTriangle(a, b, c);
     }
 
     int nonEmpty = 0;
     for (MeshObject& p : parts) {
-        if (!p.triangles().isEmpty()) {
-            p.recomputeNormals();
-            ++nonEmpty;
-        }
+        if (!p.triangles().isEmpty()) { p.recomputeNormals(); ++nonEmpty; }
     }
     if (nonEmpty == 0) {
         QMessageBox::warning(this, QStringLiteral("Cut"), QStringLiteral("No parts were generated."));
@@ -602,44 +687,29 @@ void MainWindow::performCut()
     }
 
     const QString outDir = QFileDialog::getExistingDirectory(this, QStringLiteral("Select output folder for cut parts"));
-    if (outDir.isEmpty()) {
-        return;
-    }
+    if (outDir.isEmpty()) return;
 
-    const bool numbering = m_partNumberYes->isChecked();
-    const QString stem = safeStem(m_currentFilePath);
+    const bool   numbering = m_partNumberYes->isChecked();
+    const QString stem     = safeStem(m_currentFilePath);
+    const QString methodName = m_methodCombo ? m_methodCombo->currentText() : QStringLiteral("cut");
     int written = 0;
-    for (int iz = 0; iz < sz; ++iz) {
-        for (int iy = 0; iy < sy; ++iy) {
-            for (int ix = 0; ix < sx; ++ix) {
-                const int id = idxFor(ix, iy, iz);
-                if (parts[id].triangles().isEmpty()) {
-                    continue;
-                }
-                QString fileName = QStringLiteral("%1_x%2_y%3_z%4.stl")
-                                       .arg(stem)
-                                       .arg(ix + 1)
-                                       .arg(iy + 1)
-                                       .arg(iz + 1);
-                if (numbering) {
-                    fileName = QStringLiteral("%1_part_%2_%3").arg(stem).arg(written + 1, 3, 10, QLatin1Char('0')).arg(fileName);
-                }
-                const QString full = QDir(outDir).filePath(fileName);
-                if (writeAsciiStl(full, parts[id])) {
-                    ++written;
-                }
-            }
-        }
+    for (int i = 0; i < totalParts; ++i) {
+        if (parts[i].triangles().isEmpty()) continue;
+        QString fileName = QStringLiteral("%1_%2_part%3.stl")
+                               .arg(stem)
+                               .arg(methodName.section(QLatin1Char(' '), 0, 0).toLower())
+                               .arg(i + 1);
+        if (numbering)
+            fileName = QStringLiteral("%1_").arg(written + 1, 3, 10, QLatin1Char('0')) + fileName;
+        if (writeAsciiStl(QDir(outDir).filePath(fileName), parts[i]))
+            ++written;
     }
 
-    QString note;
-    if (m_staggeredCheck->isChecked() || !qFuzzyIsNull(m_cutChamferSpin->value()) || m_closeCutNo->isChecked()) {
-        note = QStringLiteral("\nNote: stagger/chamfer/open-cut UI is captured, but current engine uses centroid-grid partitioning.");
-    }
     QMessageBox::information(
         this,
         QStringLiteral("Cut complete"),
-        QStringLiteral("Exported %1 part files to:\n%2%3").arg(written).arg(outDir).arg(note));
+        QStringLiteral("Method: %1\nExported %2 part files to:\n%3")
+            .arg(methodName).arg(written).arg(outDir));
 }
 
 bool MainWindow::askModelUnitForImport()

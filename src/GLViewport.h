@@ -18,6 +18,16 @@ public:
         Z
     };
 
+    enum class CutMethod
+    {
+        Planar,
+        Conic,
+        Flexi,
+        Grid,
+        Radial,
+        Modular
+    };
+
     enum class RenderMode
     {
         Wireframe,
@@ -34,6 +44,8 @@ public:
     RenderMode renderMode() const { return m_renderMode; }
 
     void setCuttingPlaneConfig(int countX, int countY, int countZ, Axis adjustedAxis, int adjustedIndex);
+    void setCutMethod(CutMethod method);
+    CutMethod cutMethod() const { return m_cutMethod; }
 
     void fitView();
 
@@ -53,6 +65,12 @@ private:
     void drawAxes(float length);
     void drawMesh(bool wireframeOnly, bool overlayWire);
     void drawCuttingPlanes();
+    void drawGridCutViz();
+    void drawPlanarCutViz();
+    void drawRadialCutViz();
+    void drawConicCutViz();
+    void drawFlexiCutViz();
+    void drawModularCutViz();
 
     MeshObject m_mesh;
     RenderMode m_renderMode = RenderMode::SolidWire;
@@ -71,6 +89,7 @@ private:
     int m_cutZ = 1;
     Axis m_adjustedAxis = Axis::X;
     int m_adjustedIndex = 0;
+    CutMethod m_cutMethod = CutMethod::Grid;
 
     QPoint m_lastMousePos;
 };

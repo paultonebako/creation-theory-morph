@@ -38,6 +38,7 @@ private slots:
     void onModelUnitChanged(int index);
     void updateMeshInfoStatus();
     void onCuttingPlaneChanged();
+    void onCutMethodChanged(int index);
     void onConnectorSettingsChanged();
     void performCut();
 
@@ -54,6 +55,7 @@ private:
     void updateSceneBrowser();
 
     GLViewport* m_viewport = nullptr;
+    QComboBox* m_methodCombo = nullptr;
     QFrame* m_viewportFrame = nullptr;
     QComboBox* m_unitCombo = nullptr;
     QLabel* m_meshInfoLabel = nullptr;
