@@ -1,12 +1,14 @@
 #include "MeshObject.h"
 
 #include <QtMath>
+#include <QHash>
 
 void MeshObject::clear()
 {
     m_vertices.clear();
     m_triangles.clear();
     m_faceNormals.clear();
+    m_vertexNormals.clear();
 }
 
 bool MeshObject::isEmpty() const
@@ -27,18 +29,56 @@ void MeshObject::addTriangle(int v0, int v1, int v2)
 
 void MeshObject::recomputeNormals()
 {
+    // ── Per-face normals ──────────────────────────────────────────────────────
     m_faceNormals.clear();
     m_faceNormals.reserve(m_triangles.size());
-
     for (const Triangle& tri : m_triangles) {
         const QVector3D& a = m_vertices[tri.v0];
         const QVector3D& b = m_vertices[tri.v1];
         const QVector3D& c = m_vertices[tri.v2];
         QVector3D n = QVector3D::crossProduct(b - a, c - a);
-        if (!qFuzzyIsNull(n.lengthSquared())) {
-            n.normalize();
-        }
+        if (!qFuzzyIsNull(n.lengthSquared())) n.normalize();
         m_faceNormals.push_back(n);
+    }
+
+    // ── Per-vertex normals: weld by position, smooth within 60° crease ───────
+    // Using a crease angle prevents averaging normals across sharp edges or
+    // between front/back faces (which point ~180° apart and must stay separate).
+    const float kGrid     = 1e-4f;
+    const float kCosCrease = 0.5f; // cos(60°)
+
+    auto quantKey = [&](const QVector3D& p) -> size_t {
+        int ix = int(p.x() / kGrid), iy = int(p.y() / kGrid), iz = int(p.z() / kGrid);
+        size_t h = std::hash<int>{}(ix);
+        h ^= std::hash<int>{}(iy) + 0x9e3779b9u + (h << 6) + (h >> 2);
+        h ^= std::hash<int>{}(iz) + 0x9e3779b9u + (h << 6) + (h >> 2);
+        return h;
+    };
+
+    // Build: position key → all face normals touching that position
+    QHash<size_t, QVector<QVector3D>> posNorms;
+    posNorms.reserve(m_vertices.size());
+    for (int i = 0; i < m_triangles.size(); ++i) {
+        const QVector3D& fn = m_faceNormals[i];
+        for (int vi : {m_triangles[i].v0, m_triangles[i].v1, m_triangles[i].v2}) {
+            posNorms[quantKey(m_vertices[vi])].append(fn);
+        }
+    }
+
+    // For each triangle corner, average only faces within the crease angle
+    m_vertexNormals.resize(m_vertices.size());
+    for (int i = 0; i < m_triangles.size(); ++i) {
+        const QVector3D& fn = m_faceNormals[i];
+        for (int vi : {m_triangles[i].v0, m_triangles[i].v1, m_triangles[i].v2}) {
+            const auto& list = posNorms.value(quantKey(m_vertices[vi]));
+            QVector3D sum;
+            for (const QVector3D& n : list) {
+                if (QVector3D::dotProduct(fn, n) >= kCosCrease)
+                    sum += n;
+            }
+            if (!qFuzzyIsNull(sum.lengthSquared())) sum.normalize();
+            m_vertexNormals[vi] = sum;
+        }
     }
 }
 
@@ -57,6 +97,14 @@ void MeshObject::merge(const MeshObject& other)
 
     for (const Triangle& tri : other.triangles()) {
         m_triangles.push_back({tri.v0 + offset, tri.v1 + offset, tri.v2 + offset});
+    }
+    recomputeNormals();
+}
+
+void MeshObject::applyMatrix(const QMatrix4x4& mat)
+{
+    for (QVector3D& v : m_vertices) {
+        v = (mat * QVector4D(v, 1.0f)).toVector3D();
     }
     recomputeNormals();
 }

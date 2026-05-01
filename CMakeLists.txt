@@ -31,6 +31,13 @@ set(APP_SOURCES
     src/StlLoader.cpp
     src/ObjLoader.h
     src/ObjLoader.cpp
+    src/HistoryEntry.h
+    src/TimelineWidget.h
+    src/TimelineWidget.cpp
+    src/SceneBrowserWidget.h
+    src/SceneBrowserWidget.cpp
+    src/PreferencesDialog.h
+    src/PreferencesDialog.cpp
     src/Version.h
     src/Units.h
 )

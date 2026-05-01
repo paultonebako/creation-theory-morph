@@ -1,5 +1,6 @@
 #pragma once
 
+#include <QMatrix4x4>
 #include <QVector>
 #include <QVector3D>
 
@@ -22,6 +23,7 @@ public:
     void recomputeNormals();
     void flipNormals();
     void merge(const MeshObject& other);
+    void applyMatrix(const QMatrix4x4& mat);
 
     /** Multiply every vertex position by s (normals unchanged in direction). */
     void uniformScale(float s);
@@ -36,9 +38,11 @@ public:
     const QVector<QVector3D>& vertices() const { return m_vertices; }
     const QVector<Triangle>& triangles() const { return m_triangles; }
     const QVector<QVector3D>& faceNormals() const { return m_faceNormals; }
+    const QVector<QVector3D>& vertexNormals() const { return m_vertexNormals; }
 
 private:
     QVector<QVector3D> m_vertices;
     QVector<Triangle> m_triangles;
     QVector<QVector3D> m_faceNormals;
+    QVector<QVector3D> m_vertexNormals;
 };

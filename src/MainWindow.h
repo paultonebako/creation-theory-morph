@@ -1,13 +1,18 @@
 #pragma once
 
 #include <QFrame>
+#include <QList>
 #include <QMainWindow>
 
+#include "HistoryEntry.h"
 #include "MeshObject.h"
 #include "Units.h"
 
 class GLViewport;
 class QCheckBox;
+class QDockWidget;
+class SceneBrowserWidget;
+class TimelineWidget;
 class QComboBox;
 class QDoubleSpinBox;
 class QLineEdit;
@@ -22,10 +27,13 @@ class MainWindow : public QMainWindow
     Q_OBJECT
 
 public:
+    enum class ThemeMode { Dark, Light };
+
     explicit MainWindow(QWidget* parent = nullptr);
 
 private slots:
     void openMesh();
+    void showPreferences();
     void importMesh();
     void clearScene();
     void exitApp();
@@ -41,8 +49,15 @@ private slots:
     void onCutMethodChanged(int index);
     void onConnectorSettingsChanged();
     void performCut();
+    void applyHistoryAt(int index);
+    void onTransformChanged();
+    void applyTransform();
+    void resetTransformUI();
 
 private:
+    void applyTheme(ThemeMode mode);
+    static QString darkStyleSheet();
+    static QString lightStyleSheet();
     bool loadMeshFile(const QString& path, bool merge);
     bool askModelUnitForImport();
     void applyModelUnitToNewGeometry(MeshObject& mesh);
@@ -53,8 +68,26 @@ private:
     void refreshMeshInViewport();
     void updateWindowTitle(const QString& filePath = {});
     void updateSceneBrowser();
+    void pushHistory(HistoryEntry::Type type, const QString& label);
+    void clearHistory();
 
-    GLViewport* m_viewport = nullptr;
+    GLViewport*          m_viewport      = nullptr;
+    TimelineWidget*      m_timeline      = nullptr;
+    SceneBrowserWidget*  m_sceneBrowser  = nullptr;
+    QDockWidget*         m_browserDock   = nullptr;
+    QDockWidget*         m_cutDock       = nullptr;
+    QDockWidget*         m_xfDock        = nullptr;
+    QList<HistoryEntry> m_history;
+    int m_histIdx = -1;
+
+    // Transform panel widgets
+    QDoubleSpinBox* m_xfTX = nullptr;
+    QDoubleSpinBox* m_xfTY = nullptr;
+    QDoubleSpinBox* m_xfTZ = nullptr;
+    QDoubleSpinBox* m_xfRX = nullptr;
+    QDoubleSpinBox* m_xfRY = nullptr;
+    QDoubleSpinBox* m_xfRZ = nullptr;
+    QDoubleSpinBox* m_xfScale = nullptr;
     QComboBox* m_methodCombo = nullptr;
     QFrame* m_viewportFrame = nullptr;
     QComboBox* m_unitCombo = nullptr;
@@ -88,4 +121,5 @@ private:
     MeshObject m_mesh;
     QString m_currentFilePath;
     LinearUnit m_modelUnit = LinearUnit::Millimeters;
+    ThemeMode m_themeMode = ThemeMode::Dark;
 };

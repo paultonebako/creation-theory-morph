@@ -2,9 +2,13 @@
 
 #include "GLViewport.h"
 #include "ObjLoader.h"
+#include "PreferencesDialog.h"
+#include "SceneBrowserWidget.h"
 #include "StlLoader.h"
+#include "TimelineWidget.h"
 #include "Version.h"
 
+#include <QApplication>
 #include <QActionGroup>
 #include <QComboBox>
 #include <QCheckBox>
@@ -29,6 +33,7 @@
 #include <QSpinBox>
 #include <QStatusBar>
 #include <QStyle>
+#include <QStyleFactory>
 #include <QToolBar>
 #include <QVBoxLayout>
 
@@ -76,8 +81,14 @@ bool writeAsciiStl(const QString& path, const MeshObject& mesh)
 MainWindow::MainWindow(QWidget* parent)
     : QMainWindow(parent)
 {
-    m_viewport = new GLViewport(this);
-    m_viewportFrame = new QFrame(this);
+    // Central widget: viewport frame above, timeline bar below
+    auto* centralContainer = new QWidget(this);
+    auto* outerLayout = new QVBoxLayout(centralContainer);
+    outerLayout->setContentsMargins(0, 0, 0, 0);
+    outerLayout->setSpacing(0);
+
+    m_viewport = new GLViewport(centralContainer);
+    m_viewportFrame = new QFrame(centralContainer);
     m_viewportFrame->setObjectName(QStringLiteral("viewportFrame"));
     m_viewportFrame->setFrameShape(QFrame::StyledPanel);
     m_viewportFrame->setFrameShadow(QFrame::Plain);
@@ -85,38 +96,221 @@ MainWindow::MainWindow(QWidget* parent)
     centralLay->setContentsMargins(2, 2, 2, 2);
     centralLay->setSpacing(0);
     centralLay->addWidget(m_viewport);
-    setCentralWidget(m_viewportFrame);
+    outerLayout->addWidget(m_viewportFrame, 1);
+
+    m_timeline = new TimelineWidget(centralContainer);
+    outerLayout->addWidget(m_timeline, 0);
+
+    setCentralWidget(centralContainer);
 
     createDockPanels();
     createToolBar();
     createMenus();
     createStatusWidgets();
 
+    connect(m_timeline, &TimelineWidget::jumpRequested, this, &MainWindow::applyHistoryAt);
+
+    // Sync spinboxes when viewport changes transform interactively (Blender-style R/S/G)
+    connect(m_viewport, &GLViewport::meshTransformChanged, this, [this](GLViewport::MeshTransform xf) {
+        if (!m_xfTX) return;
+        QSignalBlocker b0(m_xfTX), b1(m_xfTY), b2(m_xfTZ);
+        QSignalBlocker b3(m_xfRX), b4(m_xfRY), b5(m_xfRZ), b6(m_xfScale);
+        m_xfTX->setValue(double(xf.tx));
+        m_xfTY->setValue(double(xf.ty));
+        m_xfTZ->setValue(double(xf.tz));
+        m_xfRX->setValue(double(xf.rx));
+        m_xfRY->setValue(double(xf.ry));
+        m_xfRZ->setValue(double(xf.rz));
+        m_xfScale->setValue(double(xf.scale));
+    });
+
+    // Cutting planes follow Cut Designer dock visibility
+    connect(m_cutDock, &QDockWidget::visibilityChanged,
+            m_viewport, &GLViewport::setShowCuttingPlanes);
+    m_viewport->setShowCuttingPlanes(m_cutDock->isVisible());
+
+    // Scene browser eye toggle drives mesh visibility in viewport
+    connect(m_sceneBrowser, &SceneBrowserWidget::meshVisibilityChanged,
+            m_viewport, &GLViewport::setMeshVisible);
+
     resize(1400, 880);
     updateMeshInfoStatus();
     updateWindowTitle();
     updateSceneBrowser();
     onCuttingPlaneChanged();
+    applyTheme(ThemeMode::Dark);
+}
 
-    setStyleSheet(QStringLiteral(
-        "QMainWindow { background: #2d2d30; }"
-        "QMenuBar { background: #3e3e42; color: #e0e0e0; padding: 2px; }"
-        "QMenuBar::item:selected { background: #505052; }"
-        "QMenu { background: #3e3e42; color: #e0e0e0; }"
-        "QMenu::item:selected { background: #0e639c; }"
-        "QToolBar { background: #3c3c40; border: none; spacing: 8px; padding: 6px; }"
-        "QToolButton { background: transparent; color: #e0e0e0; padding: 4px 8px; border-radius: 3px; }"
-        "QToolButton:hover { background: #505052; }"
-        "QDockWidget { color: #e0e0e0; titlebar-close-icon: none; titlebar-normal-icon: none; }"
-        "QDockWidget::title { background: #3e3e42; padding: 6px; font-weight: 600; }"
-        "QGroupBox { border: 1px solid #4b4b4f; margin-top: 10px; padding-top: 8px; color: #e0e0e0; font-weight: 600; }"
-        "QGroupBox::title { subcontrol-origin: margin; left: 8px; padding: 0 4px; }"
-        "QSpinBox { background: #3c3c40; color: #e0e0e0; border: 1px solid #555; padding: 1px 6px; }"
-        "QRadioButton { color: #e0e0e0; }"
-        "QStatusBar { background: #007acc; color: #ffffff; }"
-        "QStatusBar QLabel { color: #ffffff; padding: 0 8px; }"
-        "QComboBox { background: #3c3c40; color: #e0e0e0; border: 1px solid #555; padding: 2px 8px; min-width: 6em; }"
-        "QFrame#viewportFrame { background: #1e1e1e; border: 1px solid #3f3f46; }"));
+// ── theme stylesheets ─────────────────────────────────────────────────────────
+
+QString MainWindow::darkStyleSheet()
+{
+    return QStringLiteral(
+        "QMainWindow { background: #000000; }"
+        "QWidget { background: #000000; color: #ffffff; }"
+        "QMenuBar { background: #000000; color: #aaaaaa; border-bottom: 1px solid #111111; padding: 3px 4px; }"
+        "QMenuBar::item { padding: 4px 12px; background: transparent; }"
+        "QMenuBar::item:selected { background: #0d0d0d; color: #ffffff; }"
+        "QMenu { background: #060606; color: #cccccc; border: 1px solid #1c1c1c; padding: 4px 0; }"
+        "QMenu::item { padding: 6px 24px 6px 16px; }"
+        "QMenu::item:selected { background: #111111; color: #ffffff; }"
+        "QMenu::separator { height: 1px; background: #111111; margin: 4px 0; }"
+        "QToolBar { background: #000000; border: none; border-bottom: 1px solid #111111; spacing: 0px; padding: 3px 6px; }"
+        "QToolButton { background: transparent; color: #888888; padding: 4px 12px; border: none; border-radius: 0; }"
+        "QToolButton:hover { background: #0c0c0c; color: #ffffff; }"
+        "QToolButton:checked { background: #0f0f0f; color: #ffffff; border-bottom: 1px solid #333333; }"
+        "QToolBar::separator { background: #111111; width: 1px; margin: 3px 8px; }"
+        "QDockWidget { color: #ffffff; }"
+        "QDockWidget::title { background: #000000; color: #444444; padding: 8px 10px; border-bottom: 1px solid #0f0f0f; font-size: 8pt; }"
+        "QDockWidget > QWidget { background: #000000; }"
+        "QGroupBox { border: none; border-top: 1px solid #111111; margin-top: 18px; padding-top: 10px; color: #444444; font-size: 8pt; }"
+        "QGroupBox::title { subcontrol-origin: margin; left: 0px; padding: 0 4px; color: #444444; }"
+        "QLabel { color: #888888; background: transparent; }"
+        "QSpinBox, QDoubleSpinBox { background: transparent; color: #dddddd; border: none; border-bottom: 1px solid #1e1e1e; padding: 2px 4px; selection-background-color: #1a1a1a; }"
+        "QSpinBox::up-button, QSpinBox::down-button, QDoubleSpinBox::up-button, QDoubleSpinBox::down-button { background: #050505; border: none; width: 14px; }"
+        "QComboBox { background: transparent; color: #dddddd; border: none; border-bottom: 1px solid #1e1e1e; padding: 2px 4px; min-width: 6em; }"
+        "QComboBox::drop-down { border: none; background: transparent; }"
+        "QComboBox QAbstractItemView { background: #060606; color: #cccccc; border: 1px solid #1c1c1c; selection-background-color: #111111; outline: none; }"
+        "QRadioButton { color: #888888; spacing: 6px; background: transparent; }"
+        "QRadioButton::indicator { width: 11px; height: 11px; border: 1px solid #2a2a2a; border-radius: 6px; background: transparent; }"
+        "QRadioButton::indicator:checked { background: #ffffff; border-color: #ffffff; }"
+        "QCheckBox { color: #888888; spacing: 6px; background: transparent; }"
+        "QCheckBox::indicator { width: 11px; height: 11px; border: 1px solid #2a2a2a; border-radius: 2px; background: transparent; }"
+        "QCheckBox::indicator:checked { background: #ffffff; border-color: #ffffff; }"
+        "QPushButton { background: transparent; color: #aaaaaa; border: 1px solid #1e1e1e; padding: 5px 14px; font-size: 9pt; }"
+        "QPushButton:hover { background: #0c0c0c; border-color: #333333; color: #ffffff; }"
+        "QPushButton:pressed { background: #141414; }"
+        "QSlider::groove:horizontal { background: #181818; height: 1px; border: none; margin: 5px 0; }"
+        "QSlider::handle:horizontal { background: #ffffff; width: 9px; height: 9px; border-radius: 5px; margin: -4px 0; }"
+        "QSlider::sub-page:horizontal { background: #444444; }"
+        "QScrollBar:vertical { background: #000000; width: 4px; margin: 0; }"
+        "QScrollBar::handle:vertical { background: #1e1e1e; border-radius: 2px; min-height: 20px; }"
+        "QScrollBar::add-line:vertical, QScrollBar::sub-line:vertical { height: 0; }"
+        "QScrollBar:horizontal { background: #000000; height: 4px; }"
+        "QScrollBar::handle:horizontal { background: #1e1e1e; border-radius: 2px; min-width: 20px; }"
+        "QScrollBar::add-line:horizontal, QScrollBar::sub-line:horizontal { width: 0; }"
+        "QStatusBar { background: #000000; color: #444444; border-top: 1px solid #0d0d0d; }"
+        "QStatusBar QLabel { color: #444444; padding: 0 8px; }"
+        "QFrame#viewportFrame { background: #030303; border: 1px solid #0d0d0d; }");
+}
+
+QString MainWindow::lightStyleSheet()
+{
+    return QStringLiteral(
+        "QMainWindow { background: #ffffff; }"
+        "QWidget { background: #ffffff; color: #111111; }"
+        "QMenuBar { background: #fafafa; color: #555555; border-bottom: 1px solid #e8e8e8; padding: 3px 4px; }"
+        "QMenuBar::item { padding: 4px 12px; background: transparent; }"
+        "QMenuBar::item:selected { background: #f0f0f0; color: #000000; }"
+        "QMenu { background: #ffffff; color: #333333; border: 1px solid #d8d8d8; padding: 4px 0; }"
+        "QMenu::item { padding: 6px 24px 6px 16px; }"
+        "QMenu::item:selected { background: #f0f0f0; color: #000000; }"
+        "QMenu::separator { height: 1px; background: #e8e8e8; margin: 4px 0; }"
+        "QToolBar { background: #f8f8f8; border: none; border-bottom: 1px solid #e8e8e8; spacing: 0px; padding: 3px 6px; }"
+        "QToolButton { background: transparent; color: #555555; padding: 4px 12px; border: none; border-radius: 0; }"
+        "QToolButton:hover { background: #eeeeee; color: #000000; }"
+        "QToolButton:checked { background: #e4e4e4; color: #000000; border-bottom: 1px solid #999999; }"
+        "QToolBar::separator { background: #e0e0e0; width: 1px; margin: 3px 8px; }"
+        "QDockWidget { color: #111111; }"
+        "QDockWidget::title { background: #f5f5f5; color: #888888; padding: 8px 10px; border-bottom: 1px solid #e8e8e8; font-size: 8pt; }"
+        "QDockWidget > QWidget { background: #ffffff; }"
+        "QGroupBox { border: none; border-top: 1px solid #e0e0e0; margin-top: 18px; padding-top: 10px; color: #aaaaaa; font-size: 8pt; }"
+        "QGroupBox::title { subcontrol-origin: margin; left: 0px; padding: 0 4px; color: #aaaaaa; }"
+        "QLabel { color: #666666; background: transparent; }"
+        "QSpinBox, QDoubleSpinBox { background: transparent; color: #111111; border: none; border-bottom: 1px solid #d0d0d0; padding: 2px 4px; selection-background-color: #e8e8e8; }"
+        "QSpinBox::up-button, QSpinBox::down-button, QDoubleSpinBox::up-button, QDoubleSpinBox::down-button { background: #f2f2f2; border: none; width: 14px; }"
+        "QComboBox { background: transparent; color: #111111; border: none; border-bottom: 1px solid #d0d0d0; padding: 2px 4px; min-width: 6em; }"
+        "QComboBox::drop-down { border: none; background: transparent; }"
+        "QComboBox QAbstractItemView { background: #ffffff; color: #333333; border: 1px solid #d8d8d8; selection-background-color: #f0f0f0; outline: none; }"
+        "QRadioButton { color: #666666; spacing: 6px; background: transparent; }"
+        "QRadioButton::indicator { width: 11px; height: 11px; border: 1px solid #cccccc; border-radius: 6px; background: transparent; }"
+        "QRadioButton::indicator:checked { background: #111111; border-color: #111111; }"
+        "QCheckBox { color: #666666; spacing: 6px; background: transparent; }"
+        "QCheckBox::indicator { width: 11px; height: 11px; border: 1px solid #cccccc; border-radius: 2px; background: transparent; }"
+        "QCheckBox::indicator:checked { background: #111111; border-color: #111111; }"
+        "QPushButton { background: transparent; color: #555555; border: 1px solid #d0d0d0; padding: 5px 14px; font-size: 9pt; }"
+        "QPushButton:hover { background: #f5f5f5; border-color: #aaaaaa; color: #000000; }"
+        "QPushButton:pressed { background: #e8e8e8; }"
+        "QSlider::groove:horizontal { background: #e0e0e0; height: 1px; border: none; margin: 5px 0; }"
+        "QSlider::handle:horizontal { background: #111111; width: 9px; height: 9px; border-radius: 5px; margin: -4px 0; }"
+        "QSlider::sub-page:horizontal { background: #888888; }"
+        "QScrollBar:vertical { background: #ffffff; width: 4px; margin: 0; }"
+        "QScrollBar::handle:vertical { background: #cccccc; border-radius: 2px; min-height: 20px; }"
+        "QScrollBar::add-line:vertical, QScrollBar::sub-line:vertical { height: 0; }"
+        "QScrollBar:horizontal { background: #ffffff; height: 4px; }"
+        "QScrollBar::handle:horizontal { background: #cccccc; border-radius: 2px; min-width: 20px; }"
+        "QScrollBar::add-line:horizontal, QScrollBar::sub-line:horizontal { width: 0; }"
+        "QStatusBar { background: #fafafa; color: #888888; border-top: 1px solid #e8e8e8; }"
+        "QStatusBar QLabel { color: #888888; padding: 0 8px; }"
+        "QFrame#viewportFrame { background: #e8e8e8; border: 1px solid #d8d8d8; }");
+}
+
+void MainWindow::applyTheme(ThemeMode mode)
+{
+    m_themeMode = mode;
+    const bool dark = (mode == ThemeMode::Dark);
+
+    qApp->setStyle(QStyleFactory::create(QStringLiteral("Fusion")));
+
+    QPalette p;
+    if (dark) {
+        p.setColor(QPalette::Window,          QColor(  0,   0,   0));
+        p.setColor(QPalette::WindowText,       QColor(255, 255, 255));
+        p.setColor(QPalette::Base,             QColor(  6,   6,   6));
+        p.setColor(QPalette::AlternateBase,    QColor( 10,  10,  10));
+        p.setColor(QPalette::ToolTipBase,      QColor(  6,   6,   6));
+        p.setColor(QPalette::ToolTipText,      QColor(255, 255, 255));
+        p.setColor(QPalette::Text,             QColor(255, 255, 255));
+        p.setColor(QPalette::BrightText,       QColor(255, 255, 255));
+        p.setColor(QPalette::Button,           QColor( 12,  12,  12));
+        p.setColor(QPalette::ButtonText,       QColor(255, 255, 255));
+        p.setColor(QPalette::Highlight,        QColor( 20,  20,  20));
+        p.setColor(QPalette::HighlightedText,  QColor(255, 255, 255));
+        p.setColor(QPalette::Link,             QColor(180, 180, 255));
+        p.setColor(QPalette::Mid,              QColor( 18,  18,  18));
+        p.setColor(QPalette::Midlight,         QColor( 25,  25,  25));
+        p.setColor(QPalette::Dark,             QColor(  0,   0,   0));
+        p.setColor(QPalette::Shadow,           QColor(  0,   0,   0));
+        p.setColor(QPalette::PlaceholderText,  QColor( 80,  80,  80));
+    } else {
+        p.setColor(QPalette::Window,           QColor(255, 255, 255));
+        p.setColor(QPalette::WindowText,       QColor( 17,  17,  17));
+        p.setColor(QPalette::Base,             QColor(255, 255, 255));
+        p.setColor(QPalette::AlternateBase,    QColor(245, 245, 245));
+        p.setColor(QPalette::ToolTipBase,      QColor(255, 255, 255));
+        p.setColor(QPalette::ToolTipText,      QColor( 17,  17,  17));
+        p.setColor(QPalette::Text,             QColor( 17,  17,  17));
+        p.setColor(QPalette::BrightText,       QColor(  0,   0,   0));
+        p.setColor(QPalette::Button,           QColor(245, 245, 245));
+        p.setColor(QPalette::ButtonText,       QColor( 17,  17,  17));
+        p.setColor(QPalette::Highlight,        QColor(230, 230, 230));
+        p.setColor(QPalette::HighlightedText,  QColor(  0,   0,   0));
+        p.setColor(QPalette::Link,             QColor( 80,  80, 200));
+        p.setColor(QPalette::Mid,              QColor(200, 200, 200));
+        p.setColor(QPalette::Midlight,         QColor(220, 220, 220));
+        p.setColor(QPalette::Dark,             QColor(180, 180, 180));
+        p.setColor(QPalette::Shadow,           QColor(120, 120, 120));
+        p.setColor(QPalette::PlaceholderText,  QColor(150, 150, 150));
+    }
+    qApp->setPalette(p);
+    qApp->setStyleSheet(dark ? darkStyleSheet() : lightStyleSheet());
+
+    if (m_viewport)      m_viewport->setDarkMode(dark);
+    if (m_sceneBrowser)  m_sceneBrowser->setDarkMode(dark);
+}
+
+void MainWindow::showPreferences()
+{
+    const auto curTheme = (m_themeMode == ThemeMode::Dark)
+                          ? PreferencesDialog::Theme::Dark
+                          : PreferencesDialog::Theme::Light;
+    PreferencesDialog dlg(curTheme, this);
+    if (dlg.exec() != QDialog::Accepted) return;
+
+    const ThemeMode newMode = (dlg.selectedTheme() == PreferencesDialog::Theme::Light)
+                              ? ThemeMode::Light : ThemeMode::Dark;
+    if (newMode != m_themeMode)
+        applyTheme(newMode);
 }
 
 void MainWindow::createToolBar()
@@ -154,10 +348,53 @@ void MainWindow::createToolBar()
     connect(wireAct, &QAction::triggered, this, &MainWindow::setWireframeMode);
     connect(solidAct, &QAction::triggered, this, &MainWindow::setSolidMode);
     connect(bothAct, &QAction::triggered, this, &MainWindow::setSolidWireMode);
+
+    tb->addSeparator();
+    QAction* browserAct = tb->addAction(QStringLiteral("Browser"));
+    browserAct->setCheckable(true);
+    browserAct->setChecked(true);
+    browserAct->setToolTip(QStringLiteral("Show / hide the Scene Browser"));
+    connect(browserAct, &QAction::toggled, this, [this](bool on) {
+        if (m_browserDock) m_browserDock->setVisible(on);
+    });
+    if (m_browserDock) {
+        connect(m_browserDock, &QDockWidget::visibilityChanged, browserAct, &QAction::setChecked);
+    }
+
+    QAction* cutPanelAct = tb->addAction(QStringLiteral("Cut Designer"));
+    cutPanelAct->setCheckable(true);
+    cutPanelAct->setChecked(true);
+    cutPanelAct->setToolTip(QStringLiteral("Show / hide the Cut Designer panel"));
+    connect(cutPanelAct, &QAction::toggled, this, [this](bool on) {
+        if (m_cutDock) m_cutDock->setVisible(on);
+    });
+    if (m_cutDock) {
+        connect(m_cutDock, &QDockWidget::visibilityChanged, cutPanelAct, &QAction::setChecked);
+    }
+
+    QAction* xfPanelAct = tb->addAction(QStringLiteral("Transform"));
+    xfPanelAct->setCheckable(true);
+    xfPanelAct->setChecked(true);
+    xfPanelAct->setToolTip(QStringLiteral("Show / hide the Transform panel  (R=rotate  S=scale  G=grab)"));
+    connect(xfPanelAct, &QAction::toggled, this, [this](bool on) {
+        if (m_xfDock) m_xfDock->setVisible(on);
+    });
+    if (m_xfDock) {
+        connect(m_xfDock, &QDockWidget::visibilityChanged, xfPanelAct, &QAction::setChecked);
+    }
 }
 
 void MainWindow::createDockPanels()
 {
+    // ── Scene Browser dock ────────────────────────────────────────────────────
+    m_sceneBrowser = new SceneBrowserWidget(this);
+    m_browserDock  = new QDockWidget(QStringLiteral("Scene Browser"), this);
+    m_browserDock->setObjectName(QStringLiteral("dockSceneBrowser"));
+    m_browserDock->setWidget(m_sceneBrowser);
+    m_browserDock->setAllowedAreas(Qt::LeftDockWidgetArea | Qt::RightDockWidgetArea);
+    m_browserDock->setMinimumWidth(200);
+    addDockWidget(Qt::LeftDockWidgetArea, m_browserDock);
+
     if (!m_unitCombo) {
         m_unitCombo = new QComboBox(this);
         m_unitCombo->addItem(QStringLiteral("Model units: mm"), static_cast<int>(LinearUnit::Millimeters));
@@ -321,12 +558,74 @@ void MainWindow::createDockPanels()
     root->addWidget(connGroup);
     root->addStretch(1);
 
-    auto* dock = new QDockWidget(QStringLiteral("Cut Designer"), this);
-    dock->setObjectName(QStringLiteral("dockCutDesigner"));
-    dock->setWidget(m_cutPanel);
-    dock->setAllowedAreas(Qt::LeftDockWidgetArea | Qt::RightDockWidgetArea);
-    dock->setMinimumWidth(280);
-    addDockWidget(Qt::LeftDockWidgetArea, dock);
+    m_cutDock = new QDockWidget(QStringLiteral("Cut Designer"), this);
+    m_cutDock->setObjectName(QStringLiteral("dockCutDesigner"));
+    m_cutDock->setWidget(m_cutPanel);
+    m_cutDock->setAllowedAreas(Qt::LeftDockWidgetArea | Qt::RightDockWidgetArea);
+    m_cutDock->setMinimumWidth(280);
+    addDockWidget(Qt::LeftDockWidgetArea, m_cutDock);
+
+    // ── Transform dock ────────────────────────────────────────────────────────
+    auto* xfPanel  = new QWidget(this);
+    auto* xfRoot   = new QVBoxLayout(xfPanel);
+    xfRoot->setContentsMargins(8, 8, 8, 8);
+    xfRoot->setSpacing(6);
+
+    auto addXfRow = [this](QVBoxLayout* layout, const QString& label, QDoubleSpinBox*& spin,
+                            double lo, double hi, double step, int dec, double def) {
+        auto* row = new QHBoxLayout();
+        auto* l = new QLabel(label, this);
+        l->setMinimumWidth(80);
+        spin = new QDoubleSpinBox(this);
+        spin->setRange(lo, hi);
+        spin->setSingleStep(step);
+        spin->setDecimals(dec);
+        spin->setValue(def);
+        row->addWidget(l);
+        row->addWidget(spin, 1);
+        layout->addLayout(row);
+    };
+
+    auto* tGroup = new QGroupBox(QStringLiteral("Translate"), xfPanel);
+    auto* tLayout = new QVBoxLayout(tGroup);
+    addXfRow(tLayout, QStringLiteral("X"), m_xfTX, -10000, 10000, 0.5, 2, 0.0);
+    addXfRow(tLayout, QStringLiteral("Y"), m_xfTY, -10000, 10000, 0.5, 2, 0.0);
+    addXfRow(tLayout, QStringLiteral("Z"), m_xfTZ, -10000, 10000, 0.5, 2, 0.0);
+
+    auto* rGroup = new QGroupBox(QStringLiteral("Rotate (degrees)"), xfPanel);
+    auto* rLayout = new QVBoxLayout(rGroup);
+    addXfRow(rLayout, QStringLiteral("X"), m_xfRX, -360, 360, 1.0, 1, 0.0);
+    addXfRow(rLayout, QStringLiteral("Y"), m_xfRY, -360, 360, 1.0, 1, 0.0);
+    addXfRow(rLayout, QStringLiteral("Z"), m_xfRZ, -360, 360, 1.0, 1, 0.0);
+
+    auto* sGroup = new QGroupBox(QStringLiteral("Scale"), xfPanel);
+    auto* sLayout = new QVBoxLayout(sGroup);
+    addXfRow(sLayout, QStringLiteral("Uniform"), m_xfScale, 0.001, 1000.0, 0.01, 3, 1.0);
+
+    auto* xfBtnRow = new QHBoxLayout();
+    auto* applyXfBtn = new QPushButton(QStringLiteral("Apply Transform"), xfPanel);
+    auto* resetXfBtn = new QPushButton(QStringLiteral("Reset"), xfPanel);
+    xfBtnRow->addWidget(applyXfBtn);
+    xfBtnRow->addWidget(resetXfBtn);
+
+    xfRoot->addWidget(tGroup);
+    xfRoot->addWidget(rGroup);
+    xfRoot->addWidget(sGroup);
+    xfRoot->addLayout(xfBtnRow);
+    xfRoot->addStretch(1);
+
+    m_xfDock = new QDockWidget(QStringLiteral("Transform"), this);
+    m_xfDock->setObjectName(QStringLiteral("dockTransform"));
+    m_xfDock->setWidget(xfPanel);
+    m_xfDock->setAllowedAreas(Qt::LeftDockWidgetArea | Qt::RightDockWidgetArea);
+    m_xfDock->setMinimumWidth(240);
+    addDockWidget(Qt::RightDockWidgetArea, m_xfDock);
+
+    for (QDoubleSpinBox* s : {m_xfTX, m_xfTY, m_xfTZ, m_xfRX, m_xfRY, m_xfRZ, m_xfScale}) {
+        connect(s, qOverload<double>(&QDoubleSpinBox::valueChanged), this, &MainWindow::onTransformChanged);
+    }
+    connect(applyXfBtn, &QPushButton::clicked, this, &MainWindow::applyTransform);
+    connect(resetXfBtn, &QPushButton::clicked, this, &MainWindow::resetTransformUI);
 
     connect(m_cutXSpin, qOverload<int>(&QSpinBox::valueChanged), this, &MainWindow::onCuttingPlaneChanged);
     connect(m_cutYSpin, qOverload<int>(&QSpinBox::valueChanged), this, &MainWindow::onCuttingPlaneChanged);
@@ -369,7 +668,7 @@ void MainWindow::createDockPanels()
     connect(m_connectorTolerance, qOverload<double>(&QDoubleSpinBox::valueChanged), this, &MainWindow::onConnectorSettingsChanged);
     connect(m_methodCombo, qOverload<int>(&QComboBox::currentIndexChanged), this, &MainWindow::onCutMethodChanged);
     connect(cutBtn, &QPushButton::clicked, this, &MainWindow::performCut);
-    connect(closeBtn, &QPushButton::clicked, this, &MainWindow::clearScene);
+    connect(closeBtn, &QPushButton::clicked, this, [this]() { if (m_cutDock) m_cutDock->hide(); });
 }
 
 void MainWindow::createStatusWidgets()
@@ -398,10 +697,18 @@ void MainWindow::createMenus()
     connect(exitAction, &QAction::triggered, this, &MainWindow::exitApp);
 
     QMenu* editMenu = menuBar()->addMenu(QStringLiteral("&Edit"));
-    editMenu->addAction(QStringLiteral("Undo"));
-    editMenu->addAction(QStringLiteral("Redo"));
+    QAction* undoAct = editMenu->addAction(QStringLiteral("Undo"));
+    undoAct->setShortcut(QKeySequence::Undo);
+    connect(undoAct, &QAction::triggered, this, [this]() {
+        if (m_histIdx >= 0) applyHistoryAt(m_histIdx - 1);
+    });
+    QAction* redoAct = editMenu->addAction(QStringLiteral("Redo"));
+    redoAct->setShortcut(QKeySequence::Redo);
+    connect(redoAct, &QAction::triggered, this, [this]() {
+        if (m_histIdx < m_history.size() - 1) applyHistoryAt(m_histIdx + 1);
+    });
     editMenu->addSeparator();
-    editMenu->addAction(QStringLiteral("Preferences"));
+    editMenu->addAction(QStringLiteral("Preferences"), this, &MainWindow::showPreferences);
 
     QMenu* viewMenu = menuBar()->addMenu(QStringLiteral("&View"));
     QActionGroup* renderGroup = new QActionGroup(this);
@@ -426,6 +733,8 @@ void MainWindow::createMenus()
 
     viewMenu->addSeparator();
     viewMenu->addAction(QStringLiteral("Fit view"), this, &MainWindow::fitView);
+    viewMenu->addSeparator();
+    if (m_cutDock) viewMenu->addAction(m_cutDock->toggleViewAction());
 
     QMenu* meshMenu = menuBar()->addMenu(QStringLiteral("&Mesh"));
     QAction* flipNormalsAction = meshMenu->addAction(QStringLiteral("Flip Normals"));
@@ -499,6 +808,9 @@ void MainWindow::onModelUnitChanged(int index)
         }
     }
     m_modelUnit = newUnit;
+    if (!m_mesh.isEmpty() && newUnit != oldUnit)
+        pushHistory(HistoryEntry::Type::UnitChange,
+                    QStringLiteral("Unit: ") + m_unitCombo->currentText().section(QLatin1Char(' '), -1));
     updateMeshInfoStatus();
 }
 
@@ -710,6 +1022,9 @@ void MainWindow::performCut()
         QStringLiteral("Cut complete"),
         QStringLiteral("Method: %1\nExported %2 part files to:\n%3")
             .arg(methodName).arg(written).arg(outDir));
+
+    pushHistory(HistoryEntry::Type::Cut,
+                QStringLiteral("%1 %2x%3").arg(methodName.section(QLatin1Char(' '), 0, 0)).arg(sx).arg(sy));
 }
 
 bool MainWindow::askModelUnitForImport()
@@ -783,7 +1098,11 @@ void MainWindow::updateMeshInfoStatus()
 
 void MainWindow::updateSceneBrowser()
 {
-    // Scene browser was replaced by the LuBan-like cut designer dock.
+    if (!m_sceneBrowser) return;
+    const QString docName = m_currentFilePath.isEmpty()
+        ? QStringLiteral("Untitled")
+        : QFileInfo(m_currentFilePath).baseName();
+    m_sceneBrowser->refresh(docName, !m_mesh.isEmpty(), true);
 }
 
 bool MainWindow::loadMeshFile(const QString& path, bool merge)
@@ -824,8 +1143,107 @@ bool MainWindow::loadMeshFile(const QString& path, bool merge)
     updateWindowTitle(path);
     updateMeshInfoStatus();
     updateSceneBrowser();
+
+    // History: opening a new file resets history; importing appends
+    if (!merge) {
+        m_history.clear();
+        m_histIdx = -1;
+    }
+    pushHistory(merge ? HistoryEntry::Type::ImportMesh : HistoryEntry::Type::LoadMesh,
+                QFileInfo(path).baseName());
+
     statusBar()->showMessage(QStringLiteral("Loaded %1").arg(QFileInfo(path).fileName()), 4000);
     return true;
+}
+
+void MainWindow::onTransformChanged()
+{
+    if (!m_viewport || !m_xfTX) return;
+    GLViewport::MeshTransform xf;
+    xf.tx    = static_cast<float>(m_xfTX->value());
+    xf.ty    = static_cast<float>(m_xfTY->value());
+    xf.tz    = static_cast<float>(m_xfTZ->value());
+    xf.rx    = static_cast<float>(m_xfRX->value());
+    xf.ry    = static_cast<float>(m_xfRY->value());
+    xf.rz    = static_cast<float>(m_xfRZ->value());
+    xf.scale = static_cast<float>(m_xfScale->value());
+    m_viewport->setMeshTransform(xf);
+}
+
+void MainWindow::applyTransform()
+{
+    if (!m_viewport || m_mesh.isEmpty() || !m_xfTX) return;
+    const GLViewport::MeshTransform xf = m_viewport->meshTransform();
+    if (xf.isIdentity()) return;
+
+    QMatrix4x4 mat;
+    const QVector3D c = m_mesh.center();
+    mat.translate(xf.tx, xf.ty, xf.tz);
+    mat.translate(c);
+    mat.rotate(xf.rx, {1, 0, 0});
+    mat.rotate(xf.ry, {0, 1, 0});
+    mat.rotate(xf.rz, {0, 0, 1});
+    mat.scale(xf.scale);
+    mat.translate(-c);
+
+    m_mesh.applyMatrix(mat);
+    m_viewport->resetMeshTransform();
+    resetTransformUI();
+    refreshMeshInViewport();
+    pushHistory(HistoryEntry::Type::Transform, QStringLiteral("Transform"));
+    statusBar()->showMessage(QStringLiteral("Transform applied and baked into mesh"), 3000);
+}
+
+void MainWindow::resetTransformUI()
+{
+    if (!m_xfTX) return;
+    const QList<QDoubleSpinBox*> txSpins{m_xfTX, m_xfTY, m_xfTZ, m_xfRX, m_xfRY, m_xfRZ};
+    for (QDoubleSpinBox* s : txSpins) {
+        QSignalBlocker blocker(s);
+        s->setValue(0.0);
+    }
+    { QSignalBlocker blocker(m_xfScale); m_xfScale->setValue(1.0); }
+    if (m_viewport) m_viewport->resetMeshTransform();
+}
+
+void MainWindow::pushHistory(HistoryEntry::Type type, const QString& label)
+{
+    // Truncate any rolled-back future before pushing
+    if (m_histIdx < m_history.size() - 1)
+        m_history.erase(m_history.begin() + m_histIdx + 1, m_history.end());
+
+    HistoryEntry entry;
+    entry.type  = type;
+    entry.label = label;
+    entry.mesh  = m_mesh;
+    m_history.append(entry);
+    m_histIdx = m_history.size() - 1;
+
+    if (m_timeline)
+        m_timeline->setEntries(m_history, m_histIdx);
+}
+
+void MainWindow::clearHistory()
+{
+    m_history.clear();
+    m_histIdx = -1;
+    if (m_timeline)
+        m_timeline->setEntries(m_history, m_histIdx);
+}
+
+void MainWindow::applyHistoryAt(int index)
+{
+    m_histIdx = index;
+    if (index < 0) {
+        m_mesh.clear();
+        m_viewport->clearMesh();
+    } else {
+        m_mesh = m_history[index].mesh;
+        refreshMeshInViewport();
+    }
+    updateMeshInfoStatus();
+    if (m_timeline)
+        m_timeline->setEntries(m_history, m_histIdx);
 }
 
 void MainWindow::clearScene()
@@ -833,6 +1251,7 @@ void MainWindow::clearScene()
     m_mesh.clear();
     m_viewport->clearMesh();
     m_currentFilePath.clear();
+    clearHistory();
     updateWindowTitle();
     updateMeshInfoStatus();
     updateSceneBrowser();
@@ -866,6 +1285,7 @@ void MainWindow::flipNormals()
     }
     m_mesh.flipNormals();
     refreshMeshInViewport();
+    pushHistory(HistoryEntry::Type::FlipNormals, QStringLiteral("Flip"));
     statusBar()->showMessage(QStringLiteral("Normals flipped"), 2500);
 }
 
