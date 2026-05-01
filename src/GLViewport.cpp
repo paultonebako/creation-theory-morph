@@ -657,11 +657,16 @@ bool GLViewport::handleViewCubeClick(const QPoint& pos)
 
 void GLViewport::drawViewCubeGL()
 {
-    const QRect cr  = viewCubeRect();
-    const int   glY = height() - cr.y() - cr.height();
+    const qreal dpr = devicePixelRatio();
+    const QRect cr  = viewCubeRect(); // logical pixels — QPainter uses these
+    // GL viewport/scissor need physical (device) pixels
+    const int glX = qRound(cr.x() * dpr);
+    const int glY = qRound((height() - cr.y() - cr.height()) * dpr);
+    const int glW = qRound(cr.width()  * dpr);
+    const int glH = qRound(cr.height() * dpr);
 
-    glViewport(cr.x(), glY, cr.width(), cr.height());
-    glScissor (cr.x(), glY, cr.width(), cr.height());
+    glViewport(glX, glY, glW, glH);
+    glScissor (glX, glY, glW, glH);
     glEnable(GL_SCISSOR_TEST);
     glClear(GL_DEPTH_BUFFER_BIT);
     glEnable(GL_DEPTH_TEST);
@@ -747,7 +752,8 @@ void GLViewport::drawViewCubeGL()
     glMatrixMode(GL_MODELVIEW);  glPopMatrix();
     glDisable(GL_SCISSOR_TEST);
     glEnable(GL_CULL_FACE);
-    glViewport(0, 0, width(), height());
+    // Restore full physical viewport (resizeGL sets physical pixels, so must we)
+    glViewport(0, 0, qRound(width() * dpr), qRound(height() * dpr));
 }
 
 void GLViewport::drawViewCubeLabels(QPainter& painter)
