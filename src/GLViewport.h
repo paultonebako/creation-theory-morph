@@ -6,6 +6,8 @@
 
 #include "MeshObject.h"
 
+class QPainter;
+
 class GLViewport : public QOpenGLWidget, protected QOpenGLFunctions
 {
     Q_OBJECT
@@ -54,6 +56,7 @@ protected:
     void resizeGL(int w, int h) override;
     void paintGL() override;
 
+    void paintEvent(QPaintEvent* event) override;
     void mousePressEvent(QMouseEvent* event) override;
     void mouseMoveEvent(QMouseEvent* event) override;
     void wheelEvent(QWheelEvent* event) override;
@@ -71,6 +74,12 @@ private:
     void drawConicCutViz();
     void drawFlexiCutViz();
     void drawModularCutViz();
+    void drawViewCubeGL();
+    void drawViewCubeLabels(QPainter& painter);
+    int  nearestVisibleFace(const QPoint& pos) const;
+    bool handleViewCubeClick(const QPoint& pos);
+    QRect   viewCubeRect() const;
+    QPoint  projectCubePoint(const QVector3D& p) const;
 
     MeshObject m_mesh;
     RenderMode m_renderMode = RenderMode::SolidWire;
@@ -92,4 +101,8 @@ private:
     CutMethod m_cutMethod = CutMethod::Grid;
 
     QPoint m_lastMousePos;
+    int m_hoveredFace = -1;
+
+    static constexpr int kCubeSize   = 110;
+    static constexpr int kCubeMargin = 14;
 };

@@ -1,6 +1,7 @@
 #include "GLViewport.h"
 
 #include <QMouseEvent>
+#include <QPainter>
 #include <QWheelEvent>
 
 #include <cmath>
@@ -33,6 +34,7 @@ GLViewport::GLViewport(QWidget* parent)
     : QOpenGLWidget(parent)
 {
     setFocusPolicy(Qt::StrongFocus);
+    setMouseTracking(true);
 }
 
 void GLViewport::setMesh(const MeshObject& mesh)
@@ -141,10 +143,22 @@ void GLViewport::paintGL()
     }
 
     drawCuttingPlanes();
+    drawViewCubeGL();
+}
+
+void GLViewport::paintEvent(QPaintEvent* event)
+{
+    QOpenGLWidget::paintEvent(event); // runs initializeGL + paintGL into FBO
+    QPainter painter(this);
+    painter.setRenderHint(QPainter::Antialiasing);
+    painter.setRenderHint(QPainter::TextAntialiasing);
+    drawViewCubeLabels(painter);
 }
 
 void GLViewport::mousePressEvent(QMouseEvent* event)
 {
+    if (handleViewCubeClick(event->pos()))
+        return;
     m_lastMousePos = event->pos();
 }
 
@@ -154,14 +168,25 @@ void GLViewport::mouseMoveEvent(QMouseEvent* event)
     m_lastMousePos = event->pos();
 
     if (event->buttons() & Qt::LeftButton) {
-        m_yawDeg += delta.x() * 0.5f;
-        m_pitchDeg += delta.y() * 0.5f;
-        m_pitchDeg = qBound(-89.0f, m_pitchDeg, 89.0f);
-        update();
+        if (!viewCubeRect().contains(event->pos() - delta)) {
+            m_yawDeg += delta.x() * 0.5f;
+            m_pitchDeg += delta.y() * 0.5f;
+            m_pitchDeg = qBound(-89.0f, m_pitchDeg, 89.0f);
+            update();
+        }
     } else if (event->buttons() & Qt::MiddleButton) {
         const float scale = m_distance * 0.0025f;
         m_pan += QVector3D(delta.x() * scale, -delta.y() * scale, 0.0f);
         update();
+    }
+
+    if (event->buttons() == Qt::NoButton) {
+        const int newHover = nearestVisibleFace(event->pos());
+        if (newHover != m_hoveredFace) {
+            m_hoveredFace = newHover;
+            setCursor(m_hoveredFace >= 0 ? Qt::PointingHandCursor : Qt::ArrowCursor);
+            update();
+        }
     }
 }
 
@@ -549,4 +574,250 @@ void GLViewport::drawModularCutViz()
         glVertex3f(b.x(), y, b.z()); glVertex3f(a.x(), y, b.z());
         glEnd();
     }
+}
+
+// ── ViewCube ─────────────────────────────────────────────────────────────────
+
+QRect GLViewport::viewCubeRect() const
+{
+    return QRect(width() - kCubeSize - kCubeMargin, kCubeMargin, kCubeSize, kCubeSize);
+}
+
+QPoint GLViewport::projectCubePoint(const QVector3D& p) const
+{
+    const QRect cr = viewCubeRect();
+    const float yr  = qDegreesToRadians(m_yawDeg);
+    const float pr  = qDegreesToRadians(m_pitchDeg);
+    const float cosY = std::cos(yr), sinY = std::sin(yr);
+    const float cosP = std::cos(pr), sinP = std::sin(pr);
+    // R_yaw then R_pitch
+    const float x1 =  p.x()*cosY + p.z()*sinY;
+    const float y1 =  p.y();
+    const float z1 = -p.x()*sinY + p.z()*cosY;
+    const float x2 = x1;
+    const float y2 = y1*cosP - z1*sinP;
+    const float half = cr.width() * 0.5f;
+    return QPoint(int(cr.x() + half + (x2 / 1.8f) * half),
+                  int(cr.y() + half - (y2 / 1.8f) * half));
+}
+
+static float cubeViewZ(const QVector3D& n, float cosY, float sinY, float cosP, float sinP)
+{
+    const float y1 =  n.y();
+    const float z1 = -n.x()*sinY + n.z()*cosY;
+    return y1*sinP + z1*cosP;
+}
+
+int GLViewport::nearestVisibleFace(const QPoint& pos) const
+{
+    if (!viewCubeRect().contains(pos)) return -1;
+
+    const float yr  = qDegreesToRadians(m_yawDeg);
+    const float pr  = qDegreesToRadians(m_pitchDeg);
+    const float cosY = std::cos(yr), sinY = std::sin(yr);
+    const float cosP = std::cos(pr), sinP = std::sin(pr);
+
+    static const QVector3D kCenters[6] = {
+        {0,1,0},{0,-1,0},{0,0,1},{0,0,-1},{1,0,0},{-1,0,0}
+    };
+
+    float bestDist = 1e9f;
+    int   bestFace = -1;
+    for (int i = 0; i < 6; ++i) {
+        if (cubeViewZ(kCenters[i], cosY, sinY, cosP, sinP) < 0.05f)
+            continue;
+        const QPoint proj = projectCubePoint(kCenters[i] * 0.82f);
+        const float dx = float(pos.x() - proj.x());
+        const float dy = float(pos.y() - proj.y());
+        const float d2 = dx*dx + dy*dy;
+        if (d2 < bestDist) { bestDist = d2; bestFace = i; }
+    }
+    return bestFace;
+}
+
+bool GLViewport::handleViewCubeClick(const QPoint& pos)
+{
+    const int face = nearestVisibleFace(pos);
+    if (face < 0) return false;
+
+    // {yaw, pitch} snap for each face: TOP, BTM, FRONT, BACK, RIGHT, LEFT
+    static constexpr float kSnap[6][2] = {
+        {  0.f, -89.f},
+        {  0.f,  89.f},
+        {  0.f,   0.f},
+        {180.f,   0.f},
+        {-90.f,   0.f},
+        { 90.f,   0.f},
+    };
+    m_yawDeg   = kSnap[face][0];
+    m_pitchDeg = kSnap[face][1];
+    update();
+    return true;
+}
+
+void GLViewport::drawViewCubeGL()
+{
+    const QRect cr  = viewCubeRect();
+    const int   glY = height() - cr.y() - cr.height();
+
+    glViewport(cr.x(), glY, cr.width(), cr.height());
+    glScissor (cr.x(), glY, cr.width(), cr.height());
+    glEnable(GL_SCISSOR_TEST);
+    glClear(GL_DEPTH_BUFFER_BIT);
+    glEnable(GL_DEPTH_TEST);
+    glDisable(GL_CULL_FACE);
+    glEnable(GL_BLEND);
+    glBlendFunc(GL_SRC_ALPHA, GL_ONE_MINUS_SRC_ALPHA);
+
+    glMatrixMode(GL_PROJECTION);
+    glPushMatrix();
+    glLoadIdentity();
+    glOrtho(-1.8, 1.8, -1.8, 1.8, -10.0, 10.0);
+
+    glMatrixMode(GL_MODELVIEW);
+    glPushMatrix();
+    glLoadIdentity();
+    glRotatef(m_pitchDeg, 1.0f, 0.0f, 0.0f);
+    glRotatef(m_yawDeg,   0.0f, 1.0f, 0.0f);
+
+    struct FaceDef { float v[4][3]; float nx, ny, nz; };
+    static constexpr float s = 0.82f;
+    static constexpr FaceDef kFaces[6] = {
+        {{{-s,s,-s},{s,s,-s},{s,s,s},{-s,s,s}},       0, 1, 0},  // TOP
+        {{{-s,-s,s},{s,-s,s},{s,-s,-s},{-s,-s,-s}},    0,-1, 0},  // BTM
+        {{{-s,-s,s},{s,-s,s},{s,s,s},{-s,s,s}},        0, 0, 1},  // FRONT
+        {{{s,-s,-s},{-s,-s,-s},{-s,s,-s},{s,s,-s}},    0, 0,-1},  // BACK
+        {{{s,-s,s},{s,-s,-s},{s,s,-s},{s,s,s}},        1, 0, 0},  // RIGHT
+        {{{-s,-s,-s},{-s,-s,s},{-s,s,s},{-s,s,-s}},   -1, 0, 0},  // LEFT
+    };
+
+    const float yr  = qDegreesToRadians(m_yawDeg);
+    const float pr  = qDegreesToRadians(m_pitchDeg);
+    const float cosY = std::cos(yr), sinY = std::sin(yr);
+    const float cosP = std::cos(pr), sinP = std::sin(pr);
+
+    for (int i = 0; i < 6; ++i) {
+        const QVector3D n(kFaces[i].nx, kFaces[i].ny, kFaces[i].nz);
+        const float nz = cubeViewZ(n, cosY, sinY, cosP, sinP);
+        const float lit = qBound(0.40f, 0.65f + nz * 0.30f, 0.95f);
+
+        if (i == m_hoveredFace)
+            glColor4f(0.42f, 0.63f, 0.90f, 0.92f);
+        else
+            glColor4f(lit, lit, lit + 0.04f, 0.90f);
+
+        glBegin(GL_QUADS);
+        for (int v = 0; v < 4; ++v)
+            glVertex3f(kFaces[i].v[v][0], kFaces[i].v[v][1], kFaces[i].v[v][2]);
+        glEnd();
+    }
+
+    // Edges
+    glDisable(GL_BLEND);
+    glColor3f(0.34f, 0.36f, 0.42f);
+    glLineWidth(1.2f);
+    static constexpr float e = s;
+    static constexpr float kEdgePts[8][3] = {
+        {-e,-e,-e},{e,-e,-e},{e,e,-e},{-e,e,-e},
+        {-e,-e, e},{e,-e, e},{e,e, e},{-e,e, e},
+    };
+    static constexpr int kEdgeIdx[12][2] = {
+        {0,1},{1,2},{2,3},{3,0},
+        {4,5},{5,6},{6,7},{7,4},
+        {0,4},{1,5},{2,6},{3,7},
+    };
+    glBegin(GL_LINES);
+    for (const auto& ei : kEdgeIdx) {
+        glVertex3fv(kEdgePts[ei[0]]);
+        glVertex3fv(kEdgePts[ei[1]]);
+    }
+    glEnd();
+
+    // Axis stubs
+    const float ax = 1.38f;
+    glLineWidth(2.5f);
+    glBegin(GL_LINES);
+    glColor3f(0.90f, 0.20f, 0.20f); glVertex3f(0,0,0); glVertex3f(ax, 0,  0);
+    glColor3f(0.20f, 0.85f, 0.20f); glVertex3f(0,0,0); glVertex3f(0,  ax, 0);
+    glColor3f(0.20f, 0.42f, 0.95f); glVertex3f(0,0,0); glVertex3f(0,  0,  ax);
+    glEnd();
+    glLineWidth(1.0f);
+
+    glMatrixMode(GL_PROJECTION); glPopMatrix();
+    glMatrixMode(GL_MODELVIEW);  glPopMatrix();
+    glDisable(GL_SCISSOR_TEST);
+    glEnable(GL_CULL_FACE);
+    glViewport(0, 0, width(), height());
+}
+
+void GLViewport::drawViewCubeLabels(QPainter& painter)
+{
+    const QRect cr  = viewCubeRect();
+    const int   sz  = cr.width();
+    const int   vpX = cr.x();
+    const int   vpY = cr.y();
+
+    const float yr  = qDegreesToRadians(m_yawDeg);
+    const float pr  = qDegreesToRadians(m_pitchDeg);
+    const float cosY = std::cos(yr), sinY = std::sin(yr);
+    const float cosP = std::cos(pr), sinP = std::sin(pr);
+
+    auto project = [&](const QVector3D& p) -> QPoint {
+        const float x1 =  p.x()*cosY + p.z()*sinY;
+        const float y1 =  p.y();
+        const float z1 = -p.x()*sinY + p.z()*cosY;
+        const float x2 = x1;
+        const float y2 = y1*cosP - z1*sinP;
+        const float half = sz * 0.5f;
+        return QPoint(int(vpX + half + (x2 / 1.8f) * half),
+                      int(vpY + half - (y2 / 1.8f) * half));
+    };
+
+    static constexpr float s = 0.82f;
+    struct LabelDef { QVector3D pos; QVector3D normal; const char* text; };
+    static const LabelDef kLabels[6] = {
+        {{0,s,0},   {0, 1,0}, "TOP"  },
+        {{0,-s,0},  {0,-1,0}, "BTM"  },
+        {{0,0,s},   {0,0, 1}, "FRONT"},
+        {{0,0,-s},  {0,0,-1}, "BACK" },
+        {{s,0,0},   {1,0, 0}, "RIGHT"},
+        {{-s,0,0},  {-1,0,0}, "LEFT" },
+    };
+
+    QFont font = painter.font();
+    font.setPixelSize(9);
+    font.setBold(true);
+    painter.setFont(font);
+
+    for (const auto& lbl : kLabels) {
+        const float nz = cubeViewZ(lbl.normal, cosY, sinY, cosP, sinP);
+        if (nz < 0.08f) continue;
+        const float alpha = qBound(0.0f, nz * 1.6f, 1.0f);
+        const QPoint pt = project(lbl.pos);
+        painter.setPen(QColor(38, 40, 52, int(alpha * 235)));
+        painter.drawText(QRect(pt.x() - 22, pt.y() - 8, 44, 16),
+                         Qt::AlignCenter, QString::fromLatin1(lbl.text));
+    }
+
+    // Axis letter labels at tips
+    const float ax = 1.38f;
+    struct AxisLabel { QVector3D pos; const char* lbl; QColor col; };
+    const AxisLabel kAxes[3] = {
+        {{ax, 0,  0}, "X", QColor(220, 55,  55)},
+        {{ 0, ax, 0}, "Y", QColor( 55,200,  55)},
+        {{ 0, 0,  ax},"Z", QColor( 55,100, 240)},
+    };
+    font.setPixelSize(12);
+    painter.setFont(font);
+    for (const auto& al : kAxes) {
+        const QPoint pt = project(al.pos);
+        painter.setPen(al.col);
+        painter.drawText(QRect(pt.x() - 9, pt.y() - 9, 18, 18),
+                         Qt::AlignCenter, QString::fromLatin1(al.lbl));
+    }
+
+    // Subtle border around the cube area
+    painter.setPen(QPen(QColor(80, 85, 100, 70), 1.0));
+    painter.setBrush(Qt::NoBrush);
+    painter.drawRoundedRect(cr.adjusted(-2, -2, 2, 2), 6, 6);
 }
