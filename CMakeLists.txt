@@ -38,6 +38,12 @@ set(APP_SOURCES
     src/SceneBrowserWidget.cpp
     src/PreferencesDialog.h
     src/PreferencesDialog.cpp
+    src/SplashScreen.h
+    src/SplashScreen.cpp
+    src/DrawingSheetWidget.h
+    src/DrawingSheetWidget.cpp
+    src/DrawingSheetWindow.h
+    src/DrawingSheetWindow.cpp
     src/Version.h
     src/Units.h
 )

@@ -1,5 +1,6 @@
 #include "MainWindow.h"
 
+#include "DrawingSheetWindow.h"
 #include "GLViewport.h"
 #include "ObjLoader.h"
 #include "PreferencesDialog.h"
@@ -11,6 +12,9 @@
 #include <QApplication>
 #include <QActionGroup>
 #include <QComboBox>
+#include <QDateTime>
+#include <QStandardPaths>
+#include <QTimer>
 #include <QCheckBox>
 #include <QDockWidget>
 #include <QDoubleSpinBox>
@@ -109,6 +113,12 @@ MainWindow::MainWindow(QWidget* parent)
     createStatusWidgets();
 
     connect(m_timeline, &TimelineWidget::jumpRequested, this, &MainWindow::applyHistoryAt);
+
+    // Autosave every 5 minutes
+    m_autosaveTimer = new QTimer(this);
+    m_autosaveTimer->setInterval(5 * 60 * 1000);
+    connect(m_autosaveTimer, &QTimer::timeout, this, &MainWindow::autoSave);
+    m_autosaveTimer->start();
 
     // Sync spinboxes when viewport changes transform interactively (Blender-style R/S/G)
     connect(m_viewport, &GLViewport::meshTransformChanged, this, [this](GLViewport::MeshTransform xf) {
@@ -744,6 +754,9 @@ void MainWindow::createMenus()
     objectMenu->addAction(QStringLiteral("Center / fit camera"), this, &MainWindow::fitView);
 
     QMenu* drawMenu = menuBar()->addMenu(QStringLiteral("&Draw"));
+    drawMenu->addAction(QStringLiteral("Create Drawing Sheet..."),
+                        this, &MainWindow::openDrawingSheet);
+    drawMenu->addSeparator();
     drawMenu->addAction(QStringLiteral("Refresh"), [this]() { m_viewport->update(); });
 
     QMenu* helpMenu = menuBar()->addMenu(QStringLiteral("&Help"));
@@ -1298,6 +1311,36 @@ void MainWindow::showAbout()
             .arg(QString::fromUtf8(CTM_PRODUCT_NAME))
             .arg(QString::fromUtf8(CTM_COMPANY_NAME))
             .arg(QString::fromUtf8(CTM_VERSION_STRING)));
+}
+
+void MainWindow::openDrawingSheet()
+{
+    if (m_mesh.isEmpty()) {
+        QMessageBox::information(this, QStringLiteral("No Model"),
+            QStringLiteral("Open or import a model before creating a drawing sheet."));
+        return;
+    }
+    const QString name = m_currentFilePath.isEmpty()
+        ? QStringLiteral("Untitled")
+        : QFileInfo(m_currentFilePath).completeBaseName();
+    auto* w = new DrawingSheetWindow(m_mesh, name, this);
+    w->setAttribute(Qt::WA_DeleteOnClose);
+    w->show();
+}
+
+void MainWindow::autoSave()
+{
+    if (m_mesh.isEmpty()) return;
+    const QString dir = QStandardPaths::writableLocation(
+        QStandardPaths::AppDataLocation);
+    QDir().mkpath(dir);
+    const QString path = dir + QStringLiteral("/autosave.stl");
+    if (writeAsciiStl(path, m_mesh)) {
+        statusBar()->showMessage(
+            QStringLiteral("Autosaved — ") +
+            QDateTime::currentDateTime().toString(QStringLiteral("hh:mm:ss")),
+            3000);
+    }
 }
 
 void MainWindow::updateWindowTitle(const QString& filePath)

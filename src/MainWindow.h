@@ -3,6 +3,7 @@
 #include <QFrame>
 #include <QList>
 #include <QMainWindow>
+#include <QTimer>
 
 #include "HistoryEntry.h"
 #include "MeshObject.h"
@@ -53,6 +54,8 @@ private slots:
     void onTransformChanged();
     void applyTransform();
     void resetTransformUI();
+    void openDrawingSheet();
+    void autoSave();
 
 private:
     void applyTheme(ThemeMode mode);
@@ -122,4 +125,5 @@ private:
     QString m_currentFilePath;
     LinearUnit m_modelUnit = LinearUnit::Millimeters;
     ThemeMode m_themeMode = ThemeMode::Dark;
+    QTimer* m_autosaveTimer = nullptr;
 };

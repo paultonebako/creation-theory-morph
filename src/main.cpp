@@ -7,6 +7,7 @@
 #include <QSurfaceFormat>
 
 #include "MainWindow.h"
+#include "SplashScreen.h"
 
 static void applyAzeretMono(QApplication& app)
 {
@@ -67,7 +68,14 @@ int main(int argc, char* argv[])
     applyFusionDarkTheme(app);
     applyAzeretMono(app);
 
-    MainWindow w;
-    w.show();
+    auto* splash = new SplashScreen();
+    MainWindow* w = new MainWindow();
+
+    QObject::connect(splash, &SplashScreen::finished, splash, [splash, w] {
+        splash->close();
+        w->show();
+    });
+
+    splash->start();
     return app.exec();
 }
